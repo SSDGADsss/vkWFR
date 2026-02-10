@@ -1,0 +1,4 @@
+clc;
+clean;
+img=imread("../smallpicture/000750.bmp");
+wft2f("wfr",img,)

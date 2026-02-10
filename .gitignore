@@ -36,3 +36,7 @@ install_manifest.txt
 *.out
 *.app
 
+compile_commands.json
+
+out/
+.cache/
