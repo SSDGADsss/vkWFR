@@ -1,0 +1,24 @@
+#version 450
+
+#extension GL_EXT_debug_printf : enable
+
+layout(constant_id = 0) const uint HANDLE_BLOCK_SIZE=1;
+layout(constant_id = 1) const uint INPUT_WIDTH=1;
+layout(constant_id = 2) const uint INPUT_HEIGHT=1;
+layout(constant_id = 3) const uint HANDLE_WIDTH=1;
+
+layout (local_size_x_id = 0) in;
+layout(binding = 0) buffer inImage { double inputI[]; };
+
+layout(push_constant) uniform PushConstants {
+  uint call_index;
+} pcs;
+
+void main() {
+  uint currentIndex=pcs.call_index*HANDLE_BLOCK_SIZE+gl_LocalInvocationID.x;
+  if(currentIndex>=HANDLE_WIDTH*INPUT_HEIGHT) return;
+  uint x_pos=currentIndex%HANDLE_WIDTH+1; // Ignore Col 0
+  uint y_pos=currentIndex/HANDLE_WIDTH;
+  inputI[(INPUT_WIDTH-x_pos+((INPUT_HEIGHT-y_pos)%INPUT_HEIGHT)*INPUT_WIDTH)*2]=inputI[(x_pos+y_pos*INPUT_WIDTH)*2];
+  inputI[(INPUT_WIDTH-x_pos+((INPUT_HEIGHT-y_pos)%INPUT_HEIGHT)*INPUT_WIDTH)*2+1]=-inputI[(x_pos+y_pos*INPUT_WIDTH)*2+1];
+}

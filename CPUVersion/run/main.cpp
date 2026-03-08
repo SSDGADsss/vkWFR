@@ -1,5 +1,6 @@
 #include <Eigen/Eigen>
 #include <Eigen/src/Core/util/Constants.h>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <fftw3.h>
@@ -133,17 +134,9 @@ wfrResult onlyWFR(Eigen::MatrixXd f, double sigmax, double wxl, double wxi,
 
   // 步骤5：扩展输入图像到尺寸[mm nn]
   MatrixXcd f_expanded = fexpand(f_complex, mm, nn);
-  std::cout << "f_expanded: " << f_expanded.rows() << "x" << f_expanded.cols()
-            << std::endl;
 
   // 步骤6：预计算输入图像的频谱
   MatrixXcd Ff = fft2(f_expanded);
-
-  {
-    std::ofstream ofile("Ff.txt", std::ios::trunc);
-    ofile << Ff;
-    ofile.close();
-  }
 
   // 步骤7：创建网格坐标（用于生成窗口）
   Eigen::MatrixXd x = Eigen::MatrixXd::Zero(2 * sx + 1, 2 * sy + 1);
@@ -272,6 +265,7 @@ int main() {
   stbi_image_free(raw_image);
 
   // 调用onlyWFR函数
+  auto start = std::chrono::high_resolution_clock::now();
   wfrResult result = onlyWFR(testImage,
                              10.0, // sigmax
                              -0.5, // wxl
@@ -282,6 +276,10 @@ int main() {
                              0.1,  // wyi
                              0.5,  // wyh
                              0.0); // thr (对于WFR不需要)
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+  std::cout << "Time taken: " << duration.count() << " ms" << std::endl;
 
   std::cout << "onlyWFR completed successfully!" << std::endl;
   std::cout << "Result dimensions: " << result.wx.rows() << "x"
