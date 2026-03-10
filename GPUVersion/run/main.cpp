@@ -2,11 +2,11 @@
 #include "kompute/Tensor.hpp"
 #include "kompute/operations/OpAlgoDispatch.hpp"
 #include "kompute/operations/OpSyncDevice.hpp"
-#include "kompute/operations/OpSyncLocal.hpp"
 #include "vulkan/vulkan_core.h"
 #include "vulkan/vulkan_handles.hpp"
 #include <Eigen/Eigen>
 #include <Eigen/src/Core/util/Constants.h>
+#include <OpFFT.hpp>
 #include <chrono>
 #include <complex>
 #include <cstdint>
@@ -303,33 +303,11 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
     std::shared_ptr<kp::Sequence> recorder(
         new kp::Sequence(physicalDevice, device, compute_queue, 0));
     // auto recorder = mgr.sequence();
-    recorder->record<kp::OpSyncDevice>({tensorIn, calReady});
+    recorder->record<kp::OpSyncDevice>({tensorIn});
     for (unsigned int i = 0; i < width * height / HandleBlockSize; i++)
       recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{i});
     // 此时calReady就是vkfft计算就绪了
     recorder->eval();
-  }
-
-  // NOTE: 在这里初始化vkFFT
-
-  VkFence fence;
-  {
-    VkFenceCreateInfo fenceCreateInfo = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    fenceCreateInfo.flags = 0;
-    if (vkCreateFence(raw_device, &fenceCreateInfo, nullptr, &fence) !=
-        VK_SUCCESS)
-      throw std::runtime_error("onlyWFR vkCreateFence failed");
-  }
-
-  VkCommandPool commandPool;
-  {
-    VkCommandPoolCreateInfo info = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    info.queueFamilyIndex = computeQueueFamilyIndex;
-    if (vkCreateCommandPool(raw_device, &info, nullptr, &commandPool) !=
-        VK_SUCCESS) {
-      throw std::runtime_error("onlyWFR vkCreateCommandPool failed");
-    }
   }
 
   // NOTE: 计算高斯窗
@@ -343,7 +321,7 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
         {HandleBlockSize, cal_width, cal_height, sigmax, sigmay}, {0});
     std::shared_ptr<kp::Sequence> recorder(
         new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    recorder->record<kp::OpSyncDevice>({GaussianWindow});
+    // recorder->record<kp::OpSyncDevice>({GaussianWindow});
     for (int i = 0;
          i < (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
          i++)
@@ -364,102 +342,24 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
   // 计算并将缓冲区发送到GPU
   uint64_t inputBufferSize = (uint64_t)sizeof(double) * mm * nn;
   uint64_t outputBufferSize = (uint64_t)sizeof(double) * mm * nn * 2;
-  uint64_t bufferSize = sizeof(double) * 2 * (mm / 2 + 1) * nn;
+  // uint64_t bufferSize = sizeof(double) * 2 * (mm / 2 + 1) * nn;
 
   std::shared_ptr<kp::TensorT<double>> FwBuffer =
       mgr.tensorT<double>(std::vector<double>(outputBufferSize));
-  std::shared_ptr<kp::TensorT<double>> fftBuffer =
-      mgr.tensorT<double>(std::vector<double>(bufferSize));
-  {
-    std::shared_ptr<kp::Sequence> recorder(
-        new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    recorder->record<kp::OpSyncDevice>({fftBuffer})
-        ->record<kp::OpSyncDevice>({FwBuffer})
-        ->eval();
-  }
+  // std::shared_ptr<kp::TensorT<double>> fftBuffer =
+  //     mgr.tensorT<double>(std::vector<double>(bufferSize));
+  // {
+  //   std::shared_ptr<kp::Sequence> recorder(
+  //       new kp::Sequence(physicalDevice, device, compute_queue, 0));
+  //   recorder
+  //       // ->record<kp::OpSyncDevice>({fftBuffer})
+  //       ->record<kp::OpSyncDevice>({FwBuffer})
+  //       ->eval();
+  // }
 
-  VkFFTConfiguration configuration = {};
-  VkFFTApplication app = {};
-  memset(&configuration, 0, sizeof(configuration));
-  memset(&app, 0, sizeof(app));
-  configuration.queue = &raw_compute_queue;
-  configuration.fence = &fence;
-  configuration.device = &raw_device;
-  configuration.commandPool = &commandPool;
-  configuration.physicalDevice = &raw_phydevice;
-  configuration.isCompilerInitialized = false;
-  configuration.FFTdim = 2;   // FFT dimension
-  configuration.size[0] = mm; // FFT size X
-  configuration.size[1] = nn; // FFT size Y
-  configuration.numberBatches = 1;
-  configuration.performR2C = 1;
-  configuration.performDCT = 0;
-  configuration.doublePrecision = 1;
-
-  configuration.isInputFormatted = 1;
-  configuration.inputBufferNum = 1;
-  configuration.inputBufferSize = &inputBufferSize;
-  configuration.inputBufferStride[0] = configuration.size[0];
-  configuration.inputBufferStride[1] =
-      configuration.size[0] * configuration.size[1];
-
-  configuration.isOutputFormatted = 1;
-  configuration.outputBufferNum = 1;
-  configuration.outputBufferSize = &outputBufferSize;
-  configuration.outputBufferStride[0] = configuration.size[0];
-  configuration.outputBufferStride[1] =
-      configuration.size[0] * configuration.size[1];
-
-  configuration.bufferSize = &bufferSize;
-  configuration.bufferNum = 1;
-
-  VkFFTResult resFFT = initializeVkFFT(&app, configuration);
-  VkFFTLaunchParams launchParams = {};
-  launchParams.buffer = (VkBuffer *)fftBuffer->getPrimaryBuffer().get();
-  launchParams.inputBuffer = (VkBuffer *)calReady->getPrimaryBuffer().get();
-  launchParams.outputBuffer = (VkBuffer *)FwBuffer->getPrimaryBuffer().get();
-
-  // NOTE: 执行VkFFT
-  {
-    VkResult res = VK_SUCCESS;
-    VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    commandBufferAllocateInfo.commandPool = commandPool;
-    commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    commandBufferAllocateInfo.commandBufferCount = 1;
-    VkCommandBuffer commandBuffer = {};
-    if (vkAllocateCommandBuffers(raw_device, &commandBufferAllocateInfo,
-                                 &commandBuffer) != VK_SUCCESS)
-      throw std::runtime_error(
-          "onlyWFR::vkAllocateCommandBuffers call is failed");
-
-    VkCommandBufferBeginInfo commandBufferBeginInfo = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo) !=
-        VK_SUCCESS)
-      throw std::runtime_error("onlyWFR::vkBeginCommandBuffer call is failed");
-    launchParams.commandBuffer = &commandBuffer;
-
-    // NOTE: 这里可以添加多个FFT步骤
-    if (VkFFTAppend(&app, -1, &launchParams) != VKFFT_SUCCESS)
-      throw std::runtime_error("onlyWFR::VkFFTAppend is failed");
-    res = vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-    if (vkQueueSubmit(raw_compute_queue, 1, &submitInfo, fence) != VK_SUCCESS)
-      throw std::runtime_error("onlyWFR::vkQueueSubmit call is failed");
-    if (vkWaitForFences(raw_device, 1, &fence, VK_TRUE, 100000000000) !=
-        VK_SUCCESS)
-      throw std::runtime_error("onlyWFR::vkWaitForFences call is failed");
-    if (vkResetFences(raw_device, 1, &fence) != VK_SUCCESS)
-      throw std::runtime_error("onlyWFR::vkResetFences call is failed");
-    vkFreeCommandBuffers(raw_device, commandPool, 1, &commandBuffer);
-  }
-
-  deleteVkFFT(&app);
+  FFT_R2C_2D fft(mm, nn, raw_instance, raw_phydevice, raw_device,
+                 computeQueueFamilyIndex);
+  fft(calReady, FwBuffer);
 
   {
     const int HandleWidth = mm / 2;
@@ -474,7 +374,6 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
     for (unsigned i = 0;
          i < (HandleWidth * nn + HandleBlockSize - 1) / HandleBlockSize; i++)
       recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{i});
-    // recorder->eval()->record<kp::OpSyncLocal>({FwBuffer})->eval();
     recorder->eval();
   }
 
