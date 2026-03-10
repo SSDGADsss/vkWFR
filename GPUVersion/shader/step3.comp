@@ -1,0 +1,47 @@
+#version 450
+
+#extension GL_EXT_debug_printf : require
+#extension GL_EXT_shader_atomic_float : require
+
+layout(constant_id = 0) const int HANDLE_BLOCK_SIZE = 1;
+layout(constant_id = 1) const int WINDOWS_WIDTH = 1;
+layout(constant_id = 2) const int WINDOWS_HEIGHT = 1;
+layout(constant_id = 3) const int X_SIZE = 1;
+layout(constant_id = 4) const int Y_SIZE = 1;
+
+layout(local_size_x_id = 0) in;
+layout(binding = 0) buffer outWindow {
+  double outW[];
+};
+
+layout(push_constant) uniform PushConstants {
+  int call_index;
+} pcs;
+
+shared float sum_counter;
+
+void main() {
+  if (gl_LocalInvocationIndex == 0)
+    sum_counter = 0;
+  barrier();
+
+  int index = HANDLE_BLOCK_SIZE * pcs.call_index + int(gl_LocalInvocationIndex);
+  if (index >= WINDOWS_WIDTH * WINDOWS_HEIGHT) return;
+
+  int pos_x = index % WINDOWS_WIDTH;
+  int pos_y = index / WINDOWS_WIDTH;
+
+  float c1 = (WINDOWS_WIDTH - 1) / 2;
+  float c2 = (WINDOWS_HEIGHT - 1) / 2;
+
+  float x1 = (pos_x - c1) * (pos_x - c1);
+  float y1 = (pos_y - c2) * (pos_y - c2);
+
+  float calres = exp(-x1 / (2 * X_SIZE * X_SIZE) - y1 / (2 * Y_SIZE * Y_SIZE));
+  outW[WINDOWS_WIDTH * pos_y + pos_x] = calres;
+
+  atomicAdd(sum_counter, calres * calres);
+  barrier();
+  if (gl_LocalInvocationIndex == 0)
+    outW[WINDOWS_WIDTH * WINDOWS_HEIGHT] += sum_counter;
+}

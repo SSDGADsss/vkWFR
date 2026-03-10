@@ -22,9 +22,10 @@ option(KOMPUTE_OPT_GIT_TAG "The tag of the repo to use for the example" v0.9.0)
 set(KOMPUTE_OPT_LOG_LEVEL Warn)
 
 include(FetchContent)
-FetchContent_Declare(kompute GIT_REPOSITORY https://github.com/KomputeProject/kompute.git
-        GIT_TAG ${KOMPUTE_OPT_GIT_TAG})
-FetchContent_MakeAvailable(kompute)
+fetchcontent_declare(kompute
+  GIT_REPOSITORY https://github.com/KomputeProject/kompute.git
+  GIT_TAG ${KOMPUTE_OPT_GIT_TAG})
+fetchcontent_makeavailable(kompute)
 include_directories(${kompute_SOURCE_DIR}/src/include)
 
 if(${CMAKE_BUILD_TYPE} MATCHES "Release")
@@ -41,16 +42,29 @@ vulkan_compile_shader(
     INFILE "shader/step2.comp"
     OUTFILE "shader/step2.hpp"
     NAMESPACE "comp")
+vulkan_compile_shader(
+    INFILE "shader/step3.comp"
+    OUTFILE "shader/step3.hpp"
+    NAMESPACE "comp")
+vulkan_compile_shader(
+    INFILE "shader/step4.comp"
+    OUTFILE "shader/step4.hpp"
+    NAMESPACE "comp")
 
 add_library(shader INTERFACE
   "shader/step1.hpp"
   "shader/step2.hpp"
+  "shader/step3.hpp"
+  "shader/step4.hpp"
 )
-target_include_directories(shader INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
+target_include_directories(shader
+  INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 add_library(VkFFT INTERFACE)
 target_compile_definitions(VkFFT INTERFACE
   -DVKFFT_BACKEND=0)
+
+aux_source_directory(src SOURCE_DIR)
 
 add_executable(${PROJECT_NAME} run/main.cpp ${SOURCE_DIR})
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -68,4 +82,4 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
   VkFFT
 )
 target_compile_definitions(${PROJECT_NAME}
-   PUBLIC -DVK_API_VERSION=13)
+  PUBLIC -DVK_API_VERSION=13)

@@ -14,11 +14,15 @@
 #include <fstream>
 #include <iostream>
 #include <kompute/Kompute.hpp>
+#include <memory>
 #include <shader/step1.hpp>
 #include <shader/step2.hpp>
+#include <shader/step3.hpp>
+#include <shader/step4.hpp>
 #include <stdexcept>
 #include <vkFFT.h>
 #include <vkFFT/vkFFT_AppManagement/vkFFT_RunApp.h>
+#include <vkFFT/vkFFT_Structs/vkFFT_Structs.h>
 #include <vulkan/vulkan.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -29,8 +33,14 @@ const static std::vector<uint32_t> shader_step1(comp::STEP1_COMP_SPV.begin(),
 // Hermitian对称性处理
 const static std::vector<uint32_t> shader_step2(comp::STEP2_COMP_SPV.begin(),
                                                 comp::STEP2_COMP_SPV.end());
-
+// 创建高斯窗
+const static std::vector<uint32_t> shader_step3(comp::STEP3_COMP_SPV.begin(),
+                                                comp::STEP3_COMP_SPV.end());
+// 高斯窗归一化
+const static std::vector<uint32_t> shader_step4(comp::STEP4_COMP_SPV.begin(),
+                                                comp::STEP4_COMP_SPV.end());
 constexpr unsigned int HandleBlockSize = 1024;
+
 // 定义复数类型
 typedef std::complex<double> Complex;
 typedef Eigen::Matrix<Complex, Eigen::Dynamic, Eigen::Dynamic> MatrixXcd;
@@ -132,8 +142,8 @@ MatrixXcd ifft2(const MatrixXcd &input) {
 
 // 主函数：onlyWFR实现
 wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
-                  std::array<unsigned int, 4> ROI, double sigmax, double wxl,
-                  double wxi, double wxh, double sigmay, double wyl, double wyi,
+                  std::array<unsigned int, 4> ROI, int sigmax, double wxl,
+                  double wxi, double wxh, int sigmay, double wyl, double wyi,
                   double wyh, double thr) {
   // 注释：onlyWFR函数 - 窗口傅里叶脊提取算法
   // 该函数用于从单个条纹图案中提取相位信息
@@ -202,35 +212,10 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
     // 选择第0个设备
     raw_phydevice = physicalDevices[0];
 
-    // 获取设备属性以检查扩展支持
-    uint32_t extensionCount = 0;
-    vkEnumerateDeviceExtensionProperties(raw_phydevice, nullptr,
-                                         &extensionCount, nullptr);
-    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-    vkEnumerateDeviceExtensionProperties(
-        raw_phydevice, nullptr, &extensionCount, availableExtensions.data());
-
-    // 检查是否支持VK_KHR_shader_non_semantic_info扩展
-    bool hasShaderNonSemanticInfo = false;
-    for (const auto &extension : availableExtensions) {
-      if (strcmp(extension.extensionName,
-                 VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0) {
-        hasShaderNonSemanticInfo = true;
-        break;
-      }
-    }
-
     // 准备设备扩展
     std::vector<const char *> deviceExtensions = {
-        VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME};
-
-    // 如果设备不支持该扩展，则移除
-    if (!hasShaderNonSemanticInfo) {
-      std::cerr << "Warning: VK_KHR_shader_non_semantic_info extension not "
-                   "supported, continuing without it"
-                << std::endl;
-      deviceExtensions.clear();
-    }
+        VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME,
+        VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME};
 
     // 获取队列族属性
     uint32_t queueFamilyCount = 0;
@@ -253,6 +238,17 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
       throw std::runtime_error("No compute queue family found");
     }
 
+    // 这里强制支持32位缓冲区浮点加法运算
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures = {
+        .sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+        .shaderSharedFloat32Atomics = VK_TRUE,
+        .shaderSharedFloat32AtomicAdd = VK_TRUE};
+
+    VkPhysicalDeviceFeatures2 deviceFeatures2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &atomicFloatFeatures};
+
     // 创建逻辑设备
     float queuePriority = 1.0f;
     VkDeviceQueueCreateInfo queueCreateInfo = {};
@@ -262,6 +258,7 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
     VkDeviceCreateInfo deviceCreateInfo = {};
+    deviceCreateInfo.pNext = &deviceFeatures2;
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = 1;
     deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
@@ -335,6 +332,35 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
     }
   }
 
+  // NOTE: 计算高斯窗
+  const int cal_width = 2 * sx + 1;
+  const int cal_height = 2 * sy + 1;
+  std::shared_ptr<kp::TensorT<double>> GaussianWindow =
+      mgr.tensorT<double>(std::vector<double>(cal_width * cal_height + 1, 0));
+  {
+    std::shared_ptr<kp::Algorithm> algo1 = mgr.algorithm<int, int>(
+        {GaussianWindow}, shader_step3, kp::Workgroup({1}),
+        {HandleBlockSize, cal_width, cal_height, sigmax, sigmay}, {0});
+    std::shared_ptr<kp::Sequence> recorder(
+        new kp::Sequence(physicalDevice, device, compute_queue, 0));
+    recorder->record<kp::OpSyncDevice>({GaussianWindow});
+    for (int i = 0;
+         i < (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
+         i++)
+      recorder->record<kp::OpAlgoDispatch>(algo1, std::vector<int>{i});
+    recorder->eval();
+    // NOTE: 归一化
+    std::shared_ptr<kp::Algorithm> algo2 = mgr.algorithm<int, int>(
+        {GaussianWindow}, shader_step4, kp::Workgroup({1}),
+        {HandleBlockSize, cal_width * cal_height}, {0});
+    for (int i = 0;
+         i < (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
+         i++)
+      recorder->record<kp::OpAlgoDispatch>(algo2, std::vector<int>{i});
+    recorder->eval();
+    ;
+  }
+
   // 计算并将缓冲区发送到GPU
   uint64_t inputBufferSize = (uint64_t)sizeof(double) * mm * nn;
   uint64_t outputBufferSize = (uint64_t)sizeof(double) * mm * nn * 2;
@@ -344,7 +370,6 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
       mgr.tensorT<double>(std::vector<double>(outputBufferSize));
   std::shared_ptr<kp::TensorT<double>> fftBuffer =
       mgr.tensorT<double>(std::vector<double>(bufferSize));
-
   {
     std::shared_ptr<kp::Sequence> recorder(
         new kp::Sequence(physicalDevice, device, compute_queue, 0));
@@ -363,10 +388,9 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
   configuration.commandPool = &commandPool;
   configuration.physicalDevice = &raw_phydevice;
   configuration.isCompilerInitialized = false;
-  configuration.FFTdim = 3;   // FFT dimension
+  configuration.FFTdim = 2;   // FFT dimension
   configuration.size[0] = mm; // FFT size X
   configuration.size[1] = nn; // FFT size Y
-  configuration.size[2] = 1;
   configuration.numberBatches = 1;
   configuration.performR2C = 1;
   configuration.performDCT = 0;
@@ -388,13 +412,6 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
 
   configuration.bufferSize = &bufferSize;
   configuration.bufferNum = 1;
-
-  // configuration.inputBuffer = (VkBuffer
-  // *)(calReady->getPrimaryBuffer().get());
-  // configuration.isOutputFormatted = 1;
-  // configuration.outputBufferSize = &outputBufferSize;
-  // configuration.outputBuffer = (VkBuffer
-  // *)(FwBuffer->getPrimaryBuffer().get());
 
   VkFFTResult resFFT = initializeVkFFT(&app, configuration);
   VkFFTLaunchParams launchParams = {};
@@ -457,24 +474,25 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
     for (unsigned i = 0;
          i < (HandleWidth * nn + HandleBlockSize - 1) / HandleBlockSize; i++)
       recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{i});
-    recorder->eval()->record<kp::OpSyncLocal>({FwBuffer})->eval();
+    // recorder->eval()->record<kp::OpSyncLocal>({FwBuffer})->eval();
+    recorder->eval();
   }
 
   // DEBUG
-  {
-    int calcounter = 0;
-    std::ofstream ofile("gpu_transform.txt", std::ios::trunc);
-    for (int i = 0; i < nn; i++) {
-      for (int j = 0; j < mm; j++) {
-        ofile << FwBuffer->data()[(i * mm + j) * 2] << "x"
-              << FwBuffer->data()[(i * mm + j) * 2 + 1] << ' ';
-        if (FwBuffer->data()[(i * mm + j) * 2] != 0)
-          calcounter++;
-      }
-      ofile << std::endl;
-    }
-    std::cout << "value counter: " << calcounter << std::endl;
-  }
+  // {
+  //   int width = 2 * sx + 1;
+  //   int height = 2 * sy + 1;
+  //   std::cout << "GaussianWindow Sum: "
+  //             << GaussianWindow->data()[width * height] << std::endl;
+  //   std::ofstream ofile("gpu_transform.txt", std::ios::trunc);
+  //   for (int i = 0; i < height; i++) {
+  //     for (int j = 0; j < width; j++) {
+  //       ofile << GaussianWindow->data()[i * width + j] << ' ';
+  //     }
+  //     ofile << std::endl;
+  //   }
+  //   ofile.close();
+  // }
 
   return {};
 }
@@ -503,24 +521,16 @@ int main() {
   std::cout << "cropImage: Width: " << testImage.cols()
             << " Height: " << testImage.rows() << std::endl;
 
-  // for (int y = 0; y < roi_height; y++) {
-  //   const unsigned char *ptrx =
-  //       raw_image + (y + roi_startY) * img_width + roi_startX;
-  //   for (int x = 0; x < roi_width; x++, ptrx++) {
-  //     testImage(y, x) = *ptrx
-  //   }
-  // }
-
   // 调用onlyWFR函数
   auto start = std::chrono::high_resolution_clock::now();
   wfrResult result =
       onlyWFR({raw_image, (std::size_t)img_width * img_height}, img_width,
               img_height, {roi_startX, roi_startY, roi_width, roi_height},
-              10.0, // sigmax
+              10,   // sigmax
               -0.5, // wxl
               0.1,  // wxi
               0.5,  // wxh
-              10.0, // sigmay
+              10,   // sigmay
               -0.5, // wyl
               0.1,  // wyi
               0.5,  // wyh
