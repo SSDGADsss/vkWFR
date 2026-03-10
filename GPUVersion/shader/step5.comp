@@ -1,0 +1,35 @@
+#version 450
+
+layout(constant_id = 0) const int HANDLE_BLOCK_SIZE = 1;
+layout(constant_id = 1) const int CAL_WIDTH = 1;
+layout(constant_id = 2) const int CAL_HEIGHT = 1;
+layout(constant_id = 3) const int RESULT_WIDTH = 1;
+layout(constant_id = 4) const int RESULT_HEIGHT = 1;
+
+layout(local_size_x_id = 0) in;
+
+layout(push_constant) uniform PushConstants {
+  float call_index;
+  float wxt;
+  float wyt;
+} pcs;
+
+layout(binding = 0) buffer window_base {
+  double w0[];
+};
+
+layout(binding = 1) buffer window_cal {
+  double w_out[];
+};
+
+void main() {
+  int index = int(pcs.call_index) * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
+  if (index >= CAL_WIDTH * CAL_HEIGHT) return;
+  int pos_x = index % CAL_WIDTH;
+  int pos_y = index / CAL_WIDTH;
+  float mesh_x_pos = pos_x - (CAL_WIDTH - 1) / 2;
+  float mesh_y_pos = pos_y - (CAL_HEIGHT - 1) / 2;
+  float temp = pcs.wxt * mesh_x_pos + pcs.wyt * mesh_y_pos;
+  w_out[(pos_x + pos_y * RESULT_WIDTH) * 2] = w0[(pos_x + pos_y * CAL_WIDTH)] * cos(temp);
+  w_out[(pos_x + pos_y * RESULT_WIDTH) * 2 + 1] = w0[(pos_x + pos_y * CAL_WIDTH)] * sin(temp);
+}

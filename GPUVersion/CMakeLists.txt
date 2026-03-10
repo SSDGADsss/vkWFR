@@ -50,12 +50,27 @@ vulkan_compile_shader(
     INFILE "shader/step4.comp"
     OUTFILE "shader/step4.hpp"
     NAMESPACE "comp")
+vulkan_compile_shader(
+    INFILE "shader/step5.comp"
+    OUTFILE "shader/step5.hpp"
+    NAMESPACE "comp")
+vulkan_compile_shader(
+    INFILE "shader/step6.comp"
+    OUTFILE "shader/step6.hpp"
+    NAMESPACE "comp")
+vulkan_compile_shader(
+    INFILE "shader/step7.comp"
+    OUTFILE "shader/step7.hpp"
+    NAMESPACE "comp")
 
 add_library(shader INTERFACE
   "shader/step1.hpp"
   "shader/step2.hpp"
   "shader/step3.hpp"
   "shader/step4.hpp"
+  "shader/step5.hpp"
+  "shader/step6.hpp"
+  "shader/step7.hpp"
 )
 target_include_directories(shader
   INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)

@@ -1,12 +1,13 @@
 #include "vulkan/vulkan_core.h"
-#include <OpFFT.hpp>
+#include <FFT_R2C_2D.hpp>
 #include <stdexcept>
 #include <vkFFT/vkFFT_Structs/vkFFT_Structs.h>
 #include <vulkan/vulkan.h>
 
 // 创建 GPU 存储缓冲区
-VkBuffer createStorageBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
-                             VkDeviceSize size, VkDeviceMemory *memory) {
+static VkBuffer createStorageBuffer(VkDevice device,
+                                    VkPhysicalDevice physicalDevice,
+                                    VkDeviceSize size, VkDeviceMemory *memory) {
 
   // 1. 创建缓冲区
   VkBufferCreateInfo bufferInfo = {
@@ -83,6 +84,8 @@ FFT_R2C_2D::FFT_R2C_2D(int width_, int height_, const VkInstance &instance_,
       inputSize(sizeof(double) * width_ * height_),
       outputSize(sizeof(double) * width_ * height_ * 2),
       bufferSize(sizeof(double) * 2 * (width_ / 2 + 1) * height_) {
+  memset(&configuration, 0, sizeof(configuration));
+  memset(&app, 0, sizeof(app));
 
   vkGetDeviceQueue(device, computeQueueFamilyIndex, 0, &queue);
 

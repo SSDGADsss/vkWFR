@@ -1,0 +1,34 @@
+#version 450
+
+layout(constant_id = 0) const int HANDLE_BLOCK_SIZE = 1;
+layout(constant_id = 1) const int INPUT_WIDTH = 1;
+layout(constant_id = 2) const int INPUT_HEIGHT = 1;
+layout(constant_id = 3) const int SX = 1;
+layout(constant_id = 4) const int SY = 1;
+layout(constant_id = 5) const int ROI_W = 1;
+layout(constant_id = 6) const int ROI_H = 1;
+
+layout(local_size_x_id = 0) in;
+
+layout(binding = 0) buffer compData {
+  double compD[];
+};
+
+layout(binding = 1) buffer resultData {
+  double resultD[];
+};
+
+layout(push_constant) uniform PushConstants {
+  int call_index;
+} pcs;
+
+void main() {
+  int index = pcs.call_index * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
+  if (index >= ROI_W * ROI_H) return;
+  int in_x = index % ROI_W + SX;
+  int in_y = index / ROI_W + SY;
+  int compIndex = (in_y * INPUT_WIDTH + in_x) * 2;
+  double cd = sqrt(compD[compIndex] * compD[compIndex] + compD[compIndex + 1] * compD[compIndex + 1]);
+  if (cd <= resultD[index]) return;
+  resultD[index] = cd;
+}

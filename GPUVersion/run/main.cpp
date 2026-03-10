@@ -1,17 +1,22 @@
+#include "kompute/Algorithm.hpp"
+#include "kompute/Core.hpp"
 #include "kompute/Sequence.hpp"
 #include "kompute/Tensor.hpp"
 #include "kompute/operations/OpAlgoDispatch.hpp"
 #include "kompute/operations/OpSyncDevice.hpp"
+#include "kompute/operations/OpSyncLocal.hpp"
 #include "vulkan/vulkan_core.h"
 #include "vulkan/vulkan_handles.hpp"
 #include <Eigen/Eigen>
 #include <Eigen/src/Core/util/Constants.h>
-#include <OpFFT.hpp>
+#include <FFT_C2C_2D.hpp>
+#include <FFT_R2C_2D.hpp>
 #include <chrono>
 #include <complex>
 #include <cstdint>
 #include <fftw3.h>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <kompute/Kompute.hpp>
 #include <memory>
@@ -19,6 +24,9 @@
 #include <shader/step2.hpp>
 #include <shader/step3.hpp>
 #include <shader/step4.hpp>
+#include <shader/step5.hpp>
+#include <shader/step6.hpp>
+#include <shader/step7.hpp>
 #include <stdexcept>
 #include <vkFFT.h>
 #include <vkFFT/vkFFT_AppManagement/vkFFT_RunApp.h>
@@ -39,6 +47,17 @@ const static std::vector<uint32_t> shader_step3(comp::STEP3_COMP_SPV.begin(),
 // 高斯窗归一化
 const static std::vector<uint32_t> shader_step4(comp::STEP4_COMP_SPV.begin(),
                                                 comp::STEP4_COMP_SPV.end());
+// WFR准备
+const static std::vector<uint32_t> shader_step5(comp::STEP5_COMP_SPV.begin(),
+                                                comp::STEP5_COMP_SPV.end());
+// 复数矩阵元素乘法
+const static std::vector<uint32_t> shader_step6(comp::STEP6_COMP_SPV.begin(),
+                                                comp::STEP6_COMP_SPV.end());
+// 脊线提取
+const static std::vector<uint32_t> shader_step7(comp::STEP7_COMP_SPV.begin(),
+                                                comp::STEP7_COMP_SPV.end());
+
+// TODO: 从vulkan C API获取每个工作组最大调用数
 constexpr unsigned int HandleBlockSize = 1024;
 
 // 定义复数类型
@@ -141,7 +160,7 @@ MatrixXcd ifft2(const MatrixXcd &input) {
 }
 
 // 主函数：onlyWFR实现
-wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
+wfrResult onlyWFR(std::vector<unsigned int> &&f, int width, int height,
                   std::array<unsigned int, 4> ROI, int sigmax, double wxl,
                   double wxi, double wxh, int sigmay, double wyl, double wyi,
                   double wyh, double thr) {
@@ -157,11 +176,6 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
   // WARN: 这里改变过语义
   const unsigned int mm = ROI[2] + 2 * sx;
   const unsigned int nn = ROI[3] + 2 * sy;
-
-  std::vector<unsigned int> intImage(f.size());
-  for (int i = 0; i < f.size(); i++) {
-    intImage[i] = f[i];
-  }
 
   VkInstance raw_instance;
   VkPhysicalDevice raw_phydevice;
@@ -284,29 +298,27 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
   auto compute_queue = std::make_shared<vk::Queue>(raw_compute_queue);
 
   // 初始化kompute
-  // kp::Manager mgr(0, {}, {"VK_KHR_shader_non_semantic_info"});
   kp::Manager mgr(instance, physicalDevice, device);
-  std::shared_ptr<kp::TensorT<unsigned int>> tensorIn =
-      mgr.tensorT<unsigned int>(std::move(intImage));
 
   std::shared_ptr<kp::TensorT<double>> calReady =
       mgr.tensorT<double>(std::vector<double>(mm * nn, 0));
 
-  std::shared_ptr<kp::Algorithm> algo =
-      mgr.algorithm<unsigned int, unsigned int>(
-          {tensorIn, calReady}, shader_step1, kp::Workgroup({1}),
-          {(unsigned int)width, (unsigned int)height, HandleBlockSize, ROI[0],
-           ROI[1], ROI[2], ROI[3], (unsigned)mm, (unsigned)nn},
-          {0});
-
+  // NOTE: 初始化计算矩阵
   {
+    // 这个用完后就没用了
+    std::shared_ptr<kp::TensorT<unsigned int>> tensorIn =
+        mgr.tensorT<unsigned int>(std::move(f));
+    std::shared_ptr<kp::Algorithm> algo =
+        mgr.algorithm<unsigned int, unsigned int>(
+            {tensorIn, calReady}, shader_step1, kp::Workgroup({1}),
+            {(unsigned int)width, (unsigned int)height, HandleBlockSize, ROI[0],
+             ROI[1], ROI[2], ROI[3], (unsigned)mm, (unsigned)nn},
+            {0});
     std::shared_ptr<kp::Sequence> recorder(
         new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    // auto recorder = mgr.sequence();
-    recorder->record<kp::OpSyncDevice>({tensorIn});
+    recorder->record<kp::OpSyncDevice>({tensorIn, calReady});
     for (unsigned int i = 0; i < width * height / HandleBlockSize; i++)
       recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{i});
-    // 此时calReady就是vkfft计算就绪了
     recorder->eval();
   }
 
@@ -314,14 +326,13 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
   const int cal_width = 2 * sx + 1;
   const int cal_height = 2 * sy + 1;
   std::shared_ptr<kp::TensorT<double>> GaussianWindow =
-      mgr.tensorT<double>(std::vector<double>(cal_width * cal_height + 1, 0));
+      mgr.tensorT<double>(std::vector<double>(cal_width * cal_height + 1));
   {
     std::shared_ptr<kp::Algorithm> algo1 = mgr.algorithm<int, int>(
         {GaussianWindow}, shader_step3, kp::Workgroup({1}),
         {HandleBlockSize, cal_width, cal_height, sigmax, sigmay}, {0});
     std::shared_ptr<kp::Sequence> recorder(
         new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    // recorder->record<kp::OpSyncDevice>({GaussianWindow});
     for (int i = 0;
          i < (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
          i++)
@@ -339,33 +350,19 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
     ;
   }
 
-  // 计算并将缓冲区发送到GPU
-  uint64_t inputBufferSize = (uint64_t)sizeof(double) * mm * nn;
-  uint64_t outputBufferSize = (uint64_t)sizeof(double) * mm * nn * 2;
-  // uint64_t bufferSize = sizeof(double) * 2 * (mm / 2 + 1) * nn;
-
-  std::shared_ptr<kp::TensorT<double>> FwBuffer =
-      mgr.tensorT<double>(std::vector<double>(outputBufferSize));
-  // std::shared_ptr<kp::TensorT<double>> fftBuffer =
-  //     mgr.tensorT<double>(std::vector<double>(bufferSize));
-  // {
-  //   std::shared_ptr<kp::Sequence> recorder(
-  //       new kp::Sequence(physicalDevice, device, compute_queue, 0));
-  //   recorder
-  //       // ->record<kp::OpSyncDevice>({fftBuffer})
-  //       ->record<kp::OpSyncDevice>({FwBuffer})
-  //       ->eval();
-  // }
-
+  // NOTE: 预计算输入频谱
+  std::shared_ptr<kp::TensorT<double>> FfBuffer =
+      mgr.tensorT<double>(std::vector<double>(sizeof(double) * mm * nn * 2));
   FFT_R2C_2D fft(mm, nn, raw_instance, raw_phydevice, raw_device,
                  computeQueueFamilyIndex);
-  fft(calReady, FwBuffer);
+  fft(calReady, FfBuffer);
 
+  // NOTE: 完成Hermitian对称性
   {
     const int HandleWidth = mm / 2;
     std::shared_ptr<kp::Algorithm> algo =
         mgr.algorithm<unsigned int, unsigned int>(
-            {FwBuffer}, shader_step2, kp::Workgroup({1}),
+            {FfBuffer}, shader_step2, kp::Workgroup({1}),
             {HandleBlockSize, (unsigned)mm, (unsigned)nn,
              (unsigned)HandleWidth},
             {0});
@@ -377,21 +374,89 @@ wfrResult onlyWFR(const std::span<uint8_t> f, int width, int height,
     recorder->eval();
   }
 
+  // 计算缓存
+  std::shared_ptr<kp::TensorT<double>> result_ridge =
+      mgr.tensorT<double>(std::vector<double>(ROI[2] * ROI[3], 0));
+  std::shared_ptr<kp::TensorT<double>> w_expanded =
+      mgr.tensorT<double>(std::vector<double>(mm * nn * 2, 0));
+  std::shared_ptr<kp::Algorithm> algo_cal_w = mgr.algorithm<int, float>(
+      {GaussianWindow, w_expanded}, shader_step5, kp::Workgroup({1}),
+      std::vector<int>{HandleBlockSize, cal_width, cal_height, (int)mm,
+                       (int)nn},
+      {0, 0, 0});
+  std::shared_ptr<kp::Algorithm> algo_cal_mulmatrix = mgr.algorithm<int, int>(
+      {FfBuffer, w_expanded}, shader_step6, kp::Workgroup({1}),
+      std::vector<int>{HandleBlockSize, (int)mm * (int)nn}, {0});
+  std::shared_ptr<kp::Algorithm> algo_cal_ridge = mgr.algorithm<int, int>(
+      {w_expanded, result_ridge}, shader_step7, kp::Workgroup({1}),
+      std::vector<int>{HandleBlockSize, (int)mm, (int)nn, sx, sy, (int)ROI[2],
+                       (int)ROI[3]},
+      {0});
+  FFT_C2C_2D fft_c2c(mm, nn, raw_instance, raw_phydevice, raw_device,
+                     computeQueueFamilyIndex);
+
+  for (float wyt = wyl; wyt <= wyh + 1e-10; wyt += wyi) {
+    for (float wxt = wxl; wxt <= wxh + 1e-10; wxt += wxi) {
+      // 复数矩阵
+      {
+        std::shared_ptr<kp::Sequence> recorder(
+            new kp::Sequence(physicalDevice, device, compute_queue, 0));
+        // 这步弄完后就是GPU上就是全0了
+        recorder->record<kp::OpSyncDevice>({w_expanded});
+        for (unsigned i = 0;
+             i <
+             (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
+             i++)
+          recorder->record<kp::OpAlgoDispatch>(
+              algo_cal_w, std::vector<float>{(float)i, wxt, wyt});
+        recorder->eval();
+      }
+      // NOTE: 计算频谱
+      fft_c2c.forward(w_expanded);
+
+      // NOTE: 矩阵元素乘法
+      {
+        std::shared_ptr<kp::Sequence> recorder(
+            new kp::Sequence(physicalDevice, device, compute_queue, 0));
+        for (int i = 0; i < (mm * nn + HandleBlockSize - 1) / HandleBlockSize;
+             i++)
+          recorder->record<kp::OpAlgoDispatch>(algo_cal_mulmatrix,
+                                               std::vector<int>{i});
+        recorder->eval();
+      }
+
+      // NOTE: 转回时域
+      fft_c2c.inverse(w_expanded);
+
+      // NOTE: 提取脊频率
+      {
+        std::shared_ptr<kp::Sequence> recorder(
+            new kp::Sequence(physicalDevice, device, compute_queue, 0));
+        for (int i = 0;
+             i < (ROI[2] * ROI[3] + HandleBlockSize - 1) / HandleBlockSize; i++)
+          recorder->record<kp::OpAlgoDispatch>(algo_cal_ridge,
+                                               std::vector<int>{i});
+        recorder->record<kp::OpSyncLocal>({result_ridge})->eval();
+      }
+    }
+  }
+
   // DEBUG
-  // {
-  //   int width = 2 * sx + 1;
-  //   int height = 2 * sy + 1;
-  //   std::cout << "GaussianWindow Sum: "
-  //             << GaussianWindow->data()[width * height] << std::endl;
-  //   std::ofstream ofile("gpu_transform.txt", std::ios::trunc);
-  //   for (int i = 0; i < height; i++) {
-  //     for (int j = 0; j < width; j++) {
-  //       ofile << GaussianWindow->data()[i * width + j] << ' ';
-  //     }
-  //     ofile << std::endl;
-  //   }
-  //   ofile.close();
-  // }
+  {
+    std::ofstream ofile("gpu_transform.txt", std::ios::trunc);
+    for (int i = 0; i < ROI[3]; i++) {
+      for (int j = 0; j < ROI[2]; j++) {
+        ofile << std::setw(14) << result_ridge->data()[i * ROI[2] + j] << ' ';
+        // ofile << std::setw(14) << std::right
+        //       << w_expanded->data()[(i * mm + j) * 2] << " x " <<
+        //       std::setw(14)
+        //       << std::left << w_expanded->data()[(i * mm + j) * 2 + 1] << '
+        //       ';
+      }
+      ofile << std::endl;
+    }
+    ofile.close();
+  }
 
   return {};
 }
@@ -420,20 +485,23 @@ int main() {
   std::cout << "cropImage: Width: " << testImage.cols()
             << " Height: " << testImage.rows() << std::endl;
 
+  std::vector<unsigned int> intImage(img_height * img_width);
+  for (int i = 0; i < img_height * img_width; i++)
+    intImage[i] = raw_image[i];
+
   // 调用onlyWFR函数
   auto start = std::chrono::high_resolution_clock::now();
-  wfrResult result =
-      onlyWFR({raw_image, (std::size_t)img_width * img_height}, img_width,
-              img_height, {roi_startX, roi_startY, roi_width, roi_height},
-              10,   // sigmax
-              -0.5, // wxl
-              0.1,  // wxi
-              0.5,  // wxh
-              10,   // sigmay
-              -0.5, // wyl
-              0.1,  // wyi
-              0.5,  // wyh
-              0.0); // thr (对于WFR不需要)
+  wfrResult result = onlyWFR(std::move(intImage), img_width, img_height,
+                             {roi_startX, roi_startY, roi_width, roi_height},
+                             10,   // sigmax
+                             -0.5, // wxl
+                             0.1,  // wxi
+                             0.5,  // wxh
+                             10,   // sigmay
+                             -0.5, // wyl
+                             0.1,  // wyi
+                             0.5,  // wyh
+                             0.0); // thr (对于WFR不需要)
   auto end = std::chrono::high_resolution_clock::now();
   auto duration =
       std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
