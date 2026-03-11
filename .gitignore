@@ -42,3 +42,4 @@ out/
 .cache/
 GPUVersion/shader/*.hpp
 matlab/wft/*.asv
+build/

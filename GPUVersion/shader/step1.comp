@@ -1,37 +1,42 @@
 #version 450
 
 #extension GL_EXT_debug_printf : enable
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
 
 layout(constant_id = 0) const uint IMAGE_WIDTH = 1;
 layout(constant_id = 1) const uint IMAGE_HEIGHT = 1;
-layout(constant_id = 2) const uint BLOCK_CALLNUM=1;
-layout(constant_id = 3) const uint ROI_STARTX=1;
-layout(constant_id = 4) const uint ROI_STARTY=1;
-layout(constant_id = 5) const uint ROI_WIDTH=1;
-layout(constant_id = 6) const uint ROI_HEIGHT=1;
-layout(constant_id = 7) const uint TARGET_WIDTH=1;
-layout(constant_id = 8) const uint TARGET_HEIGHT=1;
+layout(constant_id = 2) const uint BLOCK_CALLNUM = 1;
+layout(constant_id = 3) const uint ROI_STARTX = 1;
+layout(constant_id = 4) const uint ROI_STARTY = 1;
+layout(constant_id = 5) const uint ROI_WIDTH = 1;
+layout(constant_id = 6) const uint ROI_HEIGHT = 1;
+layout(constant_id = 7) const uint TARGET_WIDTH = 1;
+layout(constant_id = 8) const uint TARGET_HEIGHT = 1;
 
-layout (local_size_x_id = 2) in;
+layout(local_size_x_id = 2) in;
 
-layout(binding = 0) buffer inImage { uint inputI[]; };
-layout(binding = 1) buffer outMatrixD { double outMat[]; };
+layout(binding = 0) buffer inImage {
+  uint8_t inputI[];
+};
+layout(binding = 1) buffer outMatrixD {
+  double outMat[];
+};
 
 layout(push_constant) uniform PushConstants {
   uint call_index;
 } pcs;
 
 void main() {
-  uint offset=pcs.call_index*BLOCK_CALLNUM;
-  uint index=offset+gl_LocalInvocationID.x;
-  if(index>=IMAGE_WIDTH*IMAGE_HEIGHT) return;
-  uint pos_x=index%IMAGE_WIDTH;
-  uint pos_y=index/IMAGE_WIDTH;
-  if(pos_x<ROI_STARTX) return;
-  if(pos_y<ROI_STARTY) return;
-  if(pos_x>=ROI_STARTX+ROI_WIDTH) return;
-  if(pos_y>=ROI_STARTY+ROI_HEIGHT) return;
-  uint target_x=pos_x-ROI_STARTX;
-  uint target_y=pos_y-ROI_STARTY;
-  outMat[target_y*TARGET_WIDTH+target_x]=inputI[pos_y*IMAGE_WIDTH+pos_x];
+  uint offset = pcs.call_index * BLOCK_CALLNUM;
+  uint index = offset + gl_LocalInvocationID.x;
+  if (index >= IMAGE_WIDTH * IMAGE_HEIGHT) return;
+  uint pos_x = index % IMAGE_WIDTH;
+  uint pos_y = index / IMAGE_WIDTH;
+  if (pos_x < ROI_STARTX) return;
+  if (pos_y < ROI_STARTY) return;
+  if (pos_x >= ROI_STARTX + ROI_WIDTH) return;
+  if (pos_y >= ROI_STARTY + ROI_HEIGHT) return;
+  uint target_x = pos_x - ROI_STARTX;
+  uint target_y = pos_y - ROI_STARTY;
+  outMat[target_y * TARGET_WIDTH + target_x] = inputI[pos_y * IMAGE_WIDTH + pos_x];
 }

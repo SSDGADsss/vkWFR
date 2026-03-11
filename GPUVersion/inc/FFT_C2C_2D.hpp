@@ -1,3 +1,6 @@
+#ifndef FFT_C2C_2D_H
+#define FFT_C2C_2D_H
+
 #include "kompute/Tensor.hpp"
 #include "vulkan/vulkan_core.h"
 #include <memory>
@@ -28,3 +31,5 @@ public:
 
   ~FFT_C2C_2D();
 };
+
+#endif
