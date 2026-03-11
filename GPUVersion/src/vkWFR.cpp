@@ -1,7 +1,9 @@
 #include "FFT_R2C_2D.hpp"
+#include "kompute/Core.hpp"
 #include "kompute/Sequence.hpp"
 #include "kompute/Tensor.hpp"
-#include "kompute/operations/OpCopy.hpp"
+#include "kompute/operations/OpAlgoDispatch.hpp"
+#include "kompute/operations/OpSyncLocal.hpp"
 #include <memory>
 #include <shader/step1.hpp>
 #include <shader/step2.hpp>
@@ -10,6 +12,7 @@
 #include <shader/step5.hpp>
 #include <shader/step6.hpp>
 #include <shader/step7.hpp>
+#include <shader/step8.hpp>
 #include <stdexcept>
 #include <vkWFR.hpp>
 
@@ -34,9 +37,15 @@ const static std::vector<uint32_t> shader_step6(comp::STEP6_COMP_SPV.begin(),
 // 脊线提取
 const static std::vector<uint32_t> shader_step7(comp::STEP7_COMP_SPV.begin(),
                                                 comp::STEP7_COMP_SPV.end());
+// 归并结果
+const static std::vector<uint32_t> shader_step8(comp::STEP8_COMP_SPV.begin(),
+                                                comp::STEP8_COMP_SPV.end());
 
 // 工作组线程数
 constexpr unsigned int HandleBlockSize = 32;
+
+// 频率计算并行数量
+constexpr unsigned int FreqCalParallelNumber = 10;
 
 namespace kp {
 class OpMemReset : public OpBase {
@@ -70,8 +79,18 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
       cal_width(2 * static_cast<int>(std::round(3 * sigmax)) + 1),
       cal_height(2 * static_cast<int>(std::round(3 * sigmay)) + 1),
       sigmax(sigmax), sigmay(sigmay), wxl(wxl), wxi(wxi), wxh(wxh), wyl(wyl),
-      wyi(wyi), wyh(wyh), thr(thr) {
+      wyi(wyi), wyh(wyh), thr(thr), FreqCalPool(FreqCalParallelNumber) {
   {
+    // 初始化频率计算表
+    calFreqList.reserve(((wyh + 1e-10 - wyl) / wyi + 1) *
+                        ((wyh + 1e-10 - wyl) / wyi + 1));
+    for (float wyt = wyl; wyt <= wyh + 1e-10; wyt += wyi)
+      for (float wxt = wxl; wxt <= wxh + 1e-10; wxt += wxi)
+        calFreqList.push_back({wxt, wyt, 1});
+    while (calFreqList.size() % FreqCalParallelNumber != 0) {
+      calFreqList.push_back({0, 0, 0});
+    }
+
     // 初始化Vulkan实例
     VkApplicationInfo appInfo = {};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -208,7 +227,6 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
     ;
   }
   FfBuffer = mgr->tensorT<double>(std::vector<double>(mm * nn * 2));
-  w_expanded = mgr->tensorT<double>(std::vector<double>(mm * nn * 2));
   result_ridge = mgr->tensorT<double>(std::vector<double>(ROI[2] * ROI[3]));
   calReady = mgr->tensorT<double>(std::vector<double>(mm * nn));
   tensorIn = mgr->tensorT<unsigned char>(
@@ -224,33 +242,12 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
        (unsigned)ROI[0], (unsigned)ROI[1], (unsigned)ROI[2], (unsigned)ROI[3],
        (unsigned)mm, (unsigned)nn},
       {});
-  algo_cal_w = mgr->algorithm<int, float>(
-      {GaussianWindow, w_expanded}, shader_step5,
-      kp::Workgroup(
-          {(cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize, 1,
-           1}),
-      std::vector<int>{HandleBlockSize, cal_width, cal_height, (int)mm,
-                       (int)nn},
-      {0, 0});
-  algo_cal_mulmatrix = mgr->algorithm<int, int>(
-      {FfBuffer, w_expanded}, shader_step6,
-      kp::Workgroup({(mm * nn + HandleBlockSize - 1) / HandleBlockSize, 1, 1}),
-      std::vector<int>{HandleBlockSize, (int)mm * (int)nn}, {});
-  algo_cal_ridge = mgr->algorithm<int, int>(
-      {w_expanded, result_ridge}, shader_step7,
-      kp::Workgroup(
-          {(ROI[2] * ROI[3] + HandleBlockSize - 1) / HandleBlockSize, 1, 1}),
-      std::vector<int>{HandleBlockSize, (int)mm, (int)nn, sx, sy, (int)ROI[2],
-                       (int)ROI[3]},
-      {});
   algo_cal_hermitian = mgr->algorithm<unsigned int, unsigned int>(
       {FfBuffer}, shader_step2,
       kp::Workgroup({(unsigned int)((mm / 2 * nn + HandleBlockSize - 1) /
                                     HandleBlockSize),
                      1, 1}),
       {HandleBlockSize, (unsigned)mm, (unsigned)nn, (unsigned)mm / 2}, {});
-  memreset = std::make_shared<kp::OpMemReset>(
-      std::vector<std::shared_ptr<kp::TensorT<double>>>{w_expanded});
   initMem = std::make_shared<kp::OpMemReset>(
       std::vector<std::shared_ptr<kp::TensorT<double>>>{result_ridge,
                                                         calReady});
@@ -270,32 +267,78 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
     recorder_hermitian->record<kp::OpAlgoDispatch>(algo_cal_hermitian,
                                                    std::vector<unsigned int>{});
   }
-  {
-    recorder_mulmatrix = std::shared_ptr<kp::Sequence>(
-        new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    recorder_mulmatrix->record<kp::OpAlgoDispatch>(algo_cal_mulmatrix,
-                                                   std::vector<int>{});
-  }
-  {
-    recorder_cal_ridge = std::shared_ptr<kp::Sequence>(
-        new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    recorder_cal_ridge->record<kp::OpAlgoDispatch>(algo_cal_ridge,
-                                                   std::vector<int>{});
-    recorder_cal_ridge->record<kp::OpSyncLocal>({result_ridge});
-  }
-  {
-    recorder_base_func = std::shared_ptr<kp::Sequence>(
-        new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    recorder_base_func->record(memreset);
-    recorder_base_func->record<kp::OpAlgoDispatch>(algo_cal_w);
-  }
 
   fft_r2c = std::make_unique<FFT_R2C_2D>(mm, nn, calReady, FfBuffer,
                                          raw_instance, raw_phydevice,
                                          raw_device, computeQueueFamilyIndex);
-  fft_c2c = std::make_unique<FFT_C2C_2D>(mm, nn, w_expanded, raw_instance,
-                                         raw_phydevice, raw_device,
-                                         computeQueueFamilyIndex);
+  for (int i = 0; i < FreqCalParallelNumber; i++) {
+    auto &freqcal = FreqCalPool[i];
+    freqcal.w_expanded = mgr->tensorT<double>(std::vector<double>(mm * nn * 2));
+    freqcal.result = mgr->tensorT<double>(std::vector<double>(mm * nn));
+    freqcal.memreset = std::make_shared<kp::OpMemReset>(
+        std::vector<decltype(freqcal.w_expanded)>{freqcal.w_expanded,
+                                                  freqcal.result});
+    freqcal.algo_cal_w = mgr->algorithm<int, float>(
+        {GaussianWindow, freqcal.w_expanded}, shader_step5,
+        kp::Workgroup(
+            {(cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize,
+             1, 1}),
+        std::vector<int>{HandleBlockSize, cal_width, cal_height, (int)mm,
+                         (int)nn},
+        {0, 0, 1});
+    freqcal.algo_cal_mulmatrix = mgr->algorithm<int, int>(
+        {FfBuffer, freqcal.w_expanded}, shader_step6,
+        kp::Workgroup(
+            {(mm * nn + HandleBlockSize - 1) / HandleBlockSize, 1, 1}),
+        std::vector<int>{HandleBlockSize, (int)mm * (int)nn}, {});
+    freqcal.algo_cal_ridge = mgr->algorithm<int, int>(
+        {freqcal.w_expanded, freqcal.result}, shader_step7,
+        kp::Workgroup(
+            {(ROI[2] * ROI[3] + HandleBlockSize - 1) / HandleBlockSize, 1, 1}),
+        std::vector<int>{HandleBlockSize, (int)mm, (int)nn, sx, sy, (int)ROI[2],
+                         (int)ROI[3]},
+        {});
+    {
+      freqcal.recorder_mulmatrix = std::shared_ptr<kp::Sequence>(
+          new kp::Sequence(physicalDevice, device, compute_queue, 0));
+      freqcal.recorder_mulmatrix->record<kp::OpAlgoDispatch>(
+          freqcal.algo_cal_mulmatrix, std::vector<int>{});
+    }
+    {
+      freqcal.recorder_cal_ridge = std::shared_ptr<kp::Sequence>(
+          new kp::Sequence(physicalDevice, device, compute_queue, 0));
+      freqcal.recorder_cal_ridge->record<kp::OpAlgoDispatch>(
+          freqcal.algo_cal_ridge, std::vector<int>{});
+      // freqcal.recorder_cal_ridge->record<kp::OpSyncLocal>({result_ridge});
+    }
+    {
+      freqcal.recorder_base_func = std::shared_ptr<kp::Sequence>(
+          new kp::Sequence(physicalDevice, device, compute_queue, 0));
+      freqcal.recorder_base_func->record(freqcal.memreset);
+      freqcal.recorder_base_func->record<kp::OpAlgoDispatch>(
+          freqcal.algo_cal_w);
+    }
+    freqcal.fft_c2c = std::make_unique<FFT_C2C_2D>(
+        mm, nn, freqcal.w_expanded, raw_instance, raw_phydevice, raw_device,
+        computeQueueFamilyIndex);
+  }
+  std::vector<std::shared_ptr<kp::Memory>> mergeMemory(FreqCalParallelNumber +
+                                                       1);
+  for (int i = 0; i < FreqCalParallelNumber; i++)
+    mergeMemory[i] = FreqCalPool[i].result;
+  mergeMemory[FreqCalParallelNumber] = result_ridge;
+
+  algo_cal_merge = mgr->algorithm<int, int>(
+      mergeMemory, shader_step8,
+      kp::Workgroup{(mm * nn + HandleBlockSize - 1) / HandleBlockSize, 1, 1},
+      std::vector<int>{HandleBlockSize, (int)(mm * nn)}, std::vector<int>{});
+  recorder_mergeResult = std::shared_ptr<kp::Sequence>(
+      new kp::Sequence(physicalDevice, device, compute_queue, 0));
+  recorder_mergeResult->record<kp::OpAlgoDispatch>(algo_cal_merge);
+
+  recorder_allfinish = std::shared_ptr<kp::Sequence>(
+      new kp::Sequence(physicalDevice, device, compute_queue, 0));
+  recorder_allfinish->record<kp::OpSyncLocal>({result_ridge});
 }
 
 std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
@@ -313,30 +356,49 @@ std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
   // NOTE: 完成Hermitian对称性
   recorder_hermitian->eval();
 
-  float basefunc_pushConstants[2];
-  for (float wyt = wyl; wyt <= wyh + 1e-10; wyt += wyi) {
-    for (float wxt = wxl; wxt <= wxh + 1e-10; wxt += wxi) {
+  for (int i = 0; i < calFreqList.size() / FreqCalParallelNumber; i++) {
+    for (int j = 0; j < FreqCalParallelNumber; j++) {
       // NOTE: 计算基函数
-      {
-        basefunc_pushConstants[0] = wxt;
-        basefunc_pushConstants[1] = wyt;
-        algo_cal_w->setPushConstants(basefunc_pushConstants, 2, sizeof(float));
-        recorder_base_func->eval();
-      }
-      // NOTE: 计算频谱
-      fft_c2c->forward();
-
-      // NOTE: 矩阵元素乘法
-      recorder_mulmatrix->eval();
-
-      // NOTE: 转回时域
-      fft_c2c->inverse();
-
-      // NOTE: 提取脊频率
-      recorder_cal_ridge->eval();
+      FreqCalPool[j].algo_cal_w->setPushConstants(
+          calFreqList[i * FreqCalParallelNumber + j].data(), 3, sizeof(float));
+      FreqCalPool[j].recorder_base_func->evalAsync();
     }
-  }
 
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].recorder_base_func->evalAwait();
+
+    // NOTE: 计算频谱
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].fft_c2c->asyncForward();
+
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].fft_c2c->waitAsync();
+
+    // NOTE: 矩阵元素乘法
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].recorder_mulmatrix->evalAsync();
+
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].recorder_mulmatrix->evalAwait();
+
+    // NOTE: 转回时域
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].fft_c2c->asyncInverse();
+
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].fft_c2c->waitAsync();
+
+    // NOTE: 提取脊频率
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].recorder_cal_ridge->evalAsync();
+
+    for (int j = 0; j < FreqCalParallelNumber; j++)
+      FreqCalPool[j].recorder_cal_ridge->evalAwait();
+
+    // NOTE: 归并
+    recorder_mergeResult->eval();
+  }
+  recorder_allfinish->eval();
   std::vector<double> result(ROI[2] * ROI[3]);
   memcpy(result.data(), result_ridge->data(), ROI[2] * ROI[3] * sizeof(double));
   return result;

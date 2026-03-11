@@ -24,7 +24,5 @@ void main() {
   int in_x = index % ROI_W + SX;
   int in_y = index / ROI_W + SY;
   int compIndex = (in_y * INPUT_WIDTH + in_x) * 2;
-  double cd = sqrt(compD[compIndex] * compD[compIndex] + compD[compIndex + 1] * compD[compIndex + 1]);
-  if (cd <= resultD[index]) return;
-  resultD[index] = cd;
+  resultD[index] = sqrt(compD[compIndex] * compD[compIndex] + compD[compIndex + 1] * compD[compIndex + 1]);
 }

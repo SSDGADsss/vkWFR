@@ -1,0 +1,67 @@
+#version 450
+
+layout(constant_id = 0) const int HANDLE_BLOCK_SIZE = 1;
+layout(constant_id = 1) const int DATA_LENGTH = 1;
+
+layout(local_size_x_id = 0) in;
+
+layout(binding = 0) buffer compData0 {
+  double compD0[];
+};
+
+layout(binding = 1) buffer compData1 {
+  double compD1[];
+};
+
+layout(binding = 2) buffer compData2 {
+  double compD2[];
+};
+
+layout(binding = 3) buffer compData3 {
+  double compD3[];
+};
+
+layout(binding = 4) buffer compData4 {
+  double compD4[];
+};
+
+layout(binding = 5) buffer compData5 {
+  double compD5[];
+};
+
+layout(binding = 6) buffer compData6 {
+  double compD6[];
+};
+
+layout(binding = 7) buffer compData7 {
+  double compD7[];
+};
+
+layout(binding = 8) buffer compData8 {
+  double compD8[];
+};
+
+layout(binding = 9) buffer compData9 {
+  double compD9[];
+};
+
+layout(binding = 10) buffer resultData {
+  double resultD[];
+};
+
+void main() {
+  int index = int(gl_WorkGroupID.x) * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
+  if (index >= DATA_LENGTH) return;
+  double maxval = resultD[index];
+  maxval = max(maxval, compD0[index]);
+  maxval = max(maxval, compD1[index]);
+  maxval = max(maxval, compD2[index]);
+  maxval = max(maxval, compD3[index]);
+  maxval = max(maxval, compD4[index]);
+  maxval = max(maxval, compD5[index]);
+  maxval = max(maxval, compD6[index]);
+  maxval = max(maxval, compD7[index]);
+  maxval = max(maxval, compD8[index]);
+  maxval = max(maxval, compD9[index]);
+  resultD[index] = maxval;
+}

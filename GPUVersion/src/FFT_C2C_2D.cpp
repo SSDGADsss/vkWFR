@@ -109,21 +109,18 @@ FFT_C2C_2D::FFT_C2C_2D(int width_, int height_,
 }
 
 void FFT_C2C_2D::forward() {
-  {
-    VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer_forward;
-    if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::forward vkQueueSubmit call is failed");
-    if (vkWaitForFences(device, 1, &fence, VK_TRUE, 100000000000) != VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::forward vkWaitForFences call is failed");
-    if (vkResetFences(device, 1, &fence) != VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::forward vkResetFences call is failed");
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer_forward);
-  }
+  VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer_forward;
+  if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::forward vkQueueSubmit call is failed");
+  if (vkWaitForFences(device, 1, &fence, VK_TRUE, 100000000000) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::forward vkWaitForFences call is failed");
+  if (vkResetFences(device, 1, &fence) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::forward vkResetFences call is failed");
 }
 
 void FFT_C2C_2D::inverse() {
@@ -161,4 +158,31 @@ FFT_C2C_2D::~FFT_C2C_2D() {
   }
 
   // 注意：instance, phydevice, device, queue 是外部传入的，不应在此销毁
+}
+
+void FFT_C2C_2D::asyncForward() {
+  VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer_forward;
+  if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::forward vkQueueSubmit call is failed");
+}
+
+void FFT_C2C_2D::asyncInverse() {
+  VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer_inverse;
+  if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::inverse vkQueueSubmit call is failed");
+}
+
+void FFT_C2C_2D::waitAsync() {
+  if (vkWaitForFences(device, 1, &fence, VK_TRUE, 100000000000) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::forward vkWaitForFences call is failed");
+  if (vkResetFences(device, 1, &fence) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::forward vkResetFences call is failed");
 }

@@ -35,6 +35,10 @@ public:
   // WARN: forward和inverse不要并发调用
   void inverse();
 
+  void asyncInverse();
+  void asyncForward();
+  void waitAsync();
+
   ~FFT_C2C_2D();
 };
 
