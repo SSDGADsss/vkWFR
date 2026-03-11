@@ -87,12 +87,11 @@ target_compile_definitions(VkFFT INTERFACE
 
 aux_source_directory(src SOURCE_DIR)
 
-add_executable(${PROJECT_NAME} run/main.cpp ${SOURCE_DIR})
-target_include_directories(${PROJECT_NAME} PUBLIC
+include_directories(
   inc
   ${GLSLANG_HEADER_PATH}
 )
-target_link_libraries(${PROJECT_NAME} PUBLIC
+link_libraries(
   ${FFTW3_LIBRARIES}
   Eigen3::Eigen
   shader
@@ -102,5 +101,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
   Vulkan::Vulkan
   VkFFT
 )
-target_compile_definitions(${PROJECT_NAME}
-  PUBLIC -DVK_API_VERSION=13)
+add_compile_definitions(-DVK_API_VERSION=13)
+add_executable(${PROJECT_NAME} run/main.cpp ${SOURCE_DIR})
+add_executable(largeImage run/largeImage.cpp ${SOURCE_DIR})
+add_executable(smallImage run/smallImage.cpp ${SOURCE_DIR})
