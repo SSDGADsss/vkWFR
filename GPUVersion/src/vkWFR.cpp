@@ -1,5 +1,8 @@
 #include "FFT_R2C_2D.hpp"
+#include "kompute/Sequence.hpp"
 #include "kompute/Tensor.hpp"
+#include "kompute/operations/OpCopy.hpp"
+#include <memory>
 #include <shader/step1.hpp>
 #include <shader/step2.hpp>
 #include <shader/step3.hpp>
@@ -181,8 +184,8 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
   // 初始化kompute
   mgr = std::make_unique<kp::Manager>(instance, physicalDevice, device);
 
-  // 初始化高斯窗
   {
+    // NOTE: 初始化高斯窗
     int workgroupNum =
         (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
     GaussianWindow = mgr->tensorT<double>(
@@ -205,69 +208,23 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
     ;
   }
   FfBuffer = mgr->tensorT<double>(std::vector<double>(mm * nn * 2));
+  w_expanded = mgr->tensorT<double>(std::vector<double>(mm * nn * 2));
+  result_ridge = mgr->tensorT<double>(std::vector<double>(ROI[2] * ROI[3]));
+  calReady = mgr->tensorT<double>(std::vector<double>(mm * nn));
+  tensorIn = mgr->tensorT<unsigned char>(
+      std::vector<unsigned char>(imgWidth * imgHeight));
 
-  fft_r2c = std::make_unique<FFT_R2C_2D>(mm, nn, raw_instance, raw_phydevice,
-                                         raw_device, computeQueueFamilyIndex);
-  fft_c2c = std::make_unique<FFT_C2C_2D>(mm, nn, raw_instance, raw_phydevice,
-                                         raw_device, computeQueueFamilyIndex);
-}
-
-std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
-  if (image.size() != imgWidth * imgHeight)
-    throw std::runtime_error(
-        "vkWFR::operator input image size not equal imgWidth*imgHeight");
-
-  std::shared_ptr<kp::TensorT<double>> calReady =
-      mgr->tensorT<double>(std::vector<double>(mm * nn, 0));
-  {
-    int workgroupNum =
-        (imgWidth * imgHeight + HandleBlockSize - 1) / HandleBlockSize;
-    // 这个用完后就没用了
-    std::shared_ptr<kp::TensorT<unsigned char>> tensorIn =
-        mgr->tensorT<unsigned char>(std::move(image));
-    std::shared_ptr<kp::Algorithm> algo =
-        mgr->algorithm<unsigned int, unsigned int>(
-            {tensorIn, calReady}, shader_step1,
-            kp::Workgroup({(unsigned int)workgroupNum, 1, 1}),
-            {(unsigned int)imgWidth, (unsigned int)imgHeight, HandleBlockSize,
-             (unsigned)ROI[0], (unsigned)ROI[1], (unsigned)ROI[2],
-             (unsigned)ROI[3], (unsigned)mm, (unsigned)nn},
-            {});
-    std::shared_ptr<kp::Sequence> recorder(
-        new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    recorder->record<kp::OpSyncDevice>({tensorIn, calReady});
-    recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{});
-    recorder->eval();
-  }
-
-  // NOTE: 预计算输入频谱
-  FFT_R2C_2D fft(mm, nn, raw_instance, raw_phydevice, raw_device,
-                 computeQueueFamilyIndex);
-  fft(calReady, FfBuffer);
-
-  // NOTE: 完成Hermitian对称性
-  {
-    const int HandleWidth = mm / 2;
-    const int workgroupNum =
-        (HandleWidth * nn + HandleBlockSize - 1) / HandleBlockSize;
-    std::shared_ptr<kp::Algorithm> algo =
-        mgr->algorithm<unsigned int, unsigned int>(
-            {FfBuffer}, shader_step2,
-            kp::Workgroup({(unsigned int)workgroupNum, 1, 1}),
-            {HandleBlockSize, (unsigned)mm, (unsigned)nn,
-             (unsigned)HandleWidth},
-            {});
-    std::shared_ptr<kp::Sequence> recorder(
-        new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{});
-    recorder->eval();
-  }
-
-  std::shared_ptr<kp::TensorT<double>> result_ridge =
-      mgr->tensorT<double>(std::vector<double>(ROI[2] * ROI[3], 0));
-  std::shared_ptr<kp::TensorT<double>> w_expanded =
-      mgr->tensorT<double>(std::vector<double>(mm * nn * 2, 0));
-  std::shared_ptr<kp::Algorithm> algo_cal_w = mgr->algorithm<int, float>(
+  algo_cal_init = mgr->algorithm<unsigned int, unsigned int>(
+      {tensorIn, calReady}, shader_step1,
+      kp::Workgroup(
+          {(unsigned int)((imgWidth * imgHeight + HandleBlockSize - 1) /
+                          HandleBlockSize),
+           1, 1}),
+      {(unsigned int)imgWidth, (unsigned int)imgHeight, HandleBlockSize,
+       (unsigned)ROI[0], (unsigned)ROI[1], (unsigned)ROI[2], (unsigned)ROI[3],
+       (unsigned)mm, (unsigned)nn},
+      {});
+  algo_cal_w = mgr->algorithm<int, float>(
       {GaussianWindow, w_expanded}, shader_step5,
       kp::Workgroup(
           {(cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize, 1,
@@ -275,57 +232,114 @@ std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
       std::vector<int>{HandleBlockSize, cal_width, cal_height, (int)mm,
                        (int)nn},
       {0, 0});
-  std::shared_ptr<kp::Algorithm> algo_cal_mulmatrix = mgr->algorithm<int, int>(
+  algo_cal_mulmatrix = mgr->algorithm<int, int>(
       {FfBuffer, w_expanded}, shader_step6,
       kp::Workgroup({(mm * nn + HandleBlockSize - 1) / HandleBlockSize, 1, 1}),
       std::vector<int>{HandleBlockSize, (int)mm * (int)nn}, {});
-  std::shared_ptr<kp::Algorithm> algo_cal_ridge = mgr->algorithm<int, int>(
+  algo_cal_ridge = mgr->algorithm<int, int>(
       {w_expanded, result_ridge}, shader_step7,
       kp::Workgroup(
           {(ROI[2] * ROI[3] + HandleBlockSize - 1) / HandleBlockSize, 1, 1}),
       std::vector<int>{HandleBlockSize, (int)mm, (int)nn, sx, sy, (int)ROI[2],
                        (int)ROI[3]},
       {});
-  std::shared_ptr<kp::OpBase> memreset = std::make_shared<kp::OpMemReset>(
+  algo_cal_hermitian = mgr->algorithm<unsigned int, unsigned int>(
+      {FfBuffer}, shader_step2,
+      kp::Workgroup({(unsigned int)((mm / 2 * nn + HandleBlockSize - 1) /
+                                    HandleBlockSize),
+                     1, 1}),
+      {HandleBlockSize, (unsigned)mm, (unsigned)nn, (unsigned)mm / 2}, {});
+  memreset = std::make_shared<kp::OpMemReset>(
       std::vector<std::shared_ptr<kp::TensorT<double>>>{w_expanded});
+  initMem = std::make_shared<kp::OpMemReset>(
+      std::vector<std::shared_ptr<kp::TensorT<double>>>{result_ridge,
+                                                        calReady});
 
+  {
+    recorder_init = std::shared_ptr<kp::Sequence>(
+        new kp::Sequence(physicalDevice, device, compute_queue, 0));
+    recorder_init->record(initMem);
+    recorder_init->record<kp::OpSyncDevice>(
+        {algo_cal_init->getMemObjects()[0]});
+    recorder_init->record<kp::OpAlgoDispatch>(algo_cal_init,
+                                              std::vector<unsigned int>{});
+  }
+  {
+    recorder_hermitian = std::shared_ptr<kp::Sequence>(
+        new kp::Sequence(physicalDevice, device, compute_queue, 0));
+    recorder_hermitian->record<kp::OpAlgoDispatch>(algo_cal_hermitian,
+                                                   std::vector<unsigned int>{});
+  }
+  {
+    recorder_mulmatrix = std::shared_ptr<kp::Sequence>(
+        new kp::Sequence(physicalDevice, device, compute_queue, 0));
+    recorder_mulmatrix->record<kp::OpAlgoDispatch>(algo_cal_mulmatrix,
+                                                   std::vector<int>{});
+  }
+  {
+    recorder_cal_ridge = std::shared_ptr<kp::Sequence>(
+        new kp::Sequence(physicalDevice, device, compute_queue, 0));
+    recorder_cal_ridge->record<kp::OpAlgoDispatch>(algo_cal_ridge,
+                                                   std::vector<int>{});
+    recorder_cal_ridge->record<kp::OpSyncLocal>({result_ridge});
+  }
+  {
+    recorder_base_func = std::shared_ptr<kp::Sequence>(
+        new kp::Sequence(physicalDevice, device, compute_queue, 0));
+    recorder_base_func->record(memreset);
+    recorder_base_func->record<kp::OpAlgoDispatch>(algo_cal_w);
+  }
+
+  fft_r2c = std::make_unique<FFT_R2C_2D>(mm, nn, calReady, FfBuffer,
+                                         raw_instance, raw_phydevice,
+                                         raw_device, computeQueueFamilyIndex);
+  fft_c2c = std::make_unique<FFT_C2C_2D>(mm, nn, w_expanded, raw_instance,
+                                         raw_phydevice, raw_device,
+                                         computeQueueFamilyIndex);
+}
+
+std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
+  if (image.size() != imgWidth * imgHeight)
+    throw std::runtime_error(
+        "vkWFR::operator input image size not equal imgWidth*imgHeight");
+
+  // NOTE: 准备数据
+  algo_cal_init->getMemObjects()[0]->setData(image.data(), image.size());
+  recorder_init->eval();
+
+  // NOTE: 预计算输入频谱
+  (*fft_r2c)();
+
+  // NOTE: 完成Hermitian对称性
+  recorder_hermitian->eval();
+
+  float basefunc_pushConstants[2];
   for (float wyt = wyl; wyt <= wyh + 1e-10; wyt += wyi) {
     for (float wxt = wxl; wxt <= wxh + 1e-10; wxt += wxi) {
       // NOTE: 计算基函数
       {
-        std::shared_ptr<kp::Sequence> recorder(
-            new kp::Sequence(physicalDevice, device, compute_queue, 0));
-        recorder->record(memreset);
-        recorder->record<kp::OpAlgoDispatch>(algo_cal_w,
-                                             std::vector<float>{wxt, wyt});
-        recorder->eval();
+        basefunc_pushConstants[0] = wxt;
+        basefunc_pushConstants[1] = wyt;
+        algo_cal_w->setPushConstants(basefunc_pushConstants, 2, sizeof(float));
+        recorder_base_func->eval();
       }
       // NOTE: 计算频谱
-      fft_c2c->forward(w_expanded);
+      fft_c2c->forward();
 
       // NOTE: 矩阵元素乘法
-      {
-        std::shared_ptr<kp::Sequence> recorder(
-            new kp::Sequence(physicalDevice, device, compute_queue, 0));
-        recorder->record<kp::OpAlgoDispatch>(algo_cal_mulmatrix,
-                                             std::vector<int>{});
-        recorder->eval();
-      }
+      recorder_mulmatrix->eval();
 
       // NOTE: 转回时域
-      fft_c2c->inverse(w_expanded);
+      fft_c2c->inverse();
 
       // NOTE: 提取脊频率
-      {
-        std::shared_ptr<kp::Sequence> recorder(
-            new kp::Sequence(physicalDevice, device, compute_queue, 0));
-        recorder->record<kp::OpAlgoDispatch>(algo_cal_ridge,
-                                             std::vector<int>{});
-        recorder->record<kp::OpSyncLocal>({result_ridge})->eval();
-      }
+      recorder_cal_ridge->eval();
     }
   }
-  return result_ridge->vector();
+
+  std::vector<double> result(ROI[2] * ROI[3]);
+  memcpy(result.data(), result_ridge->data(), ROI[2] * ROI[3] * sizeof(double));
+  return result;
 }
 
 vkWFR::~vkWFR() {}

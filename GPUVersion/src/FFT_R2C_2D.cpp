@@ -75,7 +75,10 @@ static VkBuffer createStorageBuffer(VkDevice device,
   return buffer;
 }
 
-FFT_R2C_2D::FFT_R2C_2D(int width_, int height_, const VkInstance &instance_,
+FFT_R2C_2D::FFT_R2C_2D(int width_, int height_,
+                       std::shared_ptr<kp::TensorT<double>> input_,
+                       std::shared_ptr<kp::TensorT<double>> output_,
+                       const VkInstance &instance_,
                        const VkPhysicalDevice &phydevice_,
                        const VkDevice &device_,
                        uint32_t computeQueueFamilyIndex)
@@ -83,7 +86,8 @@ FFT_R2C_2D::FFT_R2C_2D(int width_, int height_, const VkInstance &instance_,
       width(width_), height(height_),
       inputSize(sizeof(double) * width_ * height_),
       outputSize(sizeof(double) * width_ * height_ * 2),
-      bufferSize(sizeof(double) * 2 * (width_ / 2 + 1) * height_) {
+      bufferSize(sizeof(double) * 2 * (width_ / 2 + 1) * height_),
+      input(input_), output(output_) {
   memset(&configuration, 0, sizeof(configuration));
   memset(&app, 0, sizeof(app));
 
@@ -140,10 +144,7 @@ FFT_R2C_2D::FFT_R2C_2D(int width_, int height_, const VkInstance &instance_,
   if (calbuffer.buffer == VK_NULL_HANDLE)
     throw std::runtime_error(
         "FFT_R2C_2D::constructor createStorageBuffer failed");
-}
 
-void FFT_R2C_2D::operator()(std::shared_ptr<kp::TensorT<double>> input,
-                            std::shared_ptr<kp::TensorT<double>> output) {
   VkFFTLaunchParams launchParams = {};
   launchParams.buffer = &calbuffer.buffer;
   launchParams.inputBuffer = (VkBuffer *)input->getPrimaryBuffer().get();
@@ -155,7 +156,6 @@ void FFT_R2C_2D::operator()(std::shared_ptr<kp::TensorT<double>> input,
     commandBufferAllocateInfo.commandPool = commandPool;
     commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     commandBufferAllocateInfo.commandBufferCount = 1;
-    VkCommandBuffer commandBuffer = {};
     if (vkAllocateCommandBuffers(device, &commandBufferAllocateInfo,
                                  &commandBuffer) != VK_SUCCESS)
       throw std::runtime_error(
@@ -170,13 +170,16 @@ void FFT_R2C_2D::operator()(std::shared_ptr<kp::TensorT<double>> input,
           "FFT_R2C_2D::operator vkBeginCommandBuffer is failed");
     launchParams.commandBuffer = &commandBuffer;
 
-    // NOTE: 这里可以添加多个FFT步骤用于优化
     if (VkFFTAppend(&app, -1, &launchParams) != VKFFT_SUCCESS)
       throw std::runtime_error("FFT_R2C_2D::operator VkFFTAppend is failed");
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
       throw std::runtime_error(
           "FFT_R2C_2D::operator vkEndCommandBuffer is failed");
+  }
+}
 
+void FFT_R2C_2D::operator()() {
+  {
     VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
@@ -189,11 +192,12 @@ void FFT_R2C_2D::operator()(std::shared_ptr<kp::TensorT<double>> input,
     if (vkResetFences(device, 1, &fence) != VK_SUCCESS)
       throw std::runtime_error(
           "FFT_R2C_2D::operator vkResetFences call is failed");
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
   }
 }
 
 FFT_R2C_2D::~FFT_R2C_2D() {
+
+  vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
   // 清理vkFFT应用
   deleteVkFFT(&app);
 

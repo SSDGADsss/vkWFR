@@ -4,12 +4,15 @@
 #include <vkFFT/vkFFT_Structs/vkFFT_Structs.h>
 #include <vulkan/vulkan.h>
 
-FFT_C2C_2D::FFT_C2C_2D(int width_, int height_, const VkInstance &instance_,
+FFT_C2C_2D::FFT_C2C_2D(int width_, int height_,
+                       std::shared_ptr<kp::TensorT<double>> data_,
+                       const VkInstance &instance_,
                        const VkPhysicalDevice &phydevice_,
                        const VkDevice &device_,
                        uint32_t computeQueueFamilyIndex)
     : instance(instance_), phydevice(phydevice_), device(device_),
-      width(width_), height(height_), bufferSize(16 * width_ * height_) {
+      width(width_), height(height_), bufferSize(16 * width_ * height_),
+      data(data_) {
   memset(&configuration, 0, sizeof(configuration));
   memset(&app, 0, sizeof(app));
 
@@ -45,43 +48,71 @@ FFT_C2C_2D::FFT_C2C_2D(int width_, int height_, const VkInstance &instance_,
 
   if (initializeVkFFT(&app, configuration) != VKFFT_SUCCESS)
     throw std::runtime_error("FFT_C2C_2D::constructor initializeVkFFT failed");
-}
-
-void FFT_C2C_2D::forward(std::shared_ptr<kp::TensorT<double>> data) {
-  VkFFTLaunchParams launchParams = {};
-  launchParams.buffer = (VkBuffer *)data->getPrimaryBuffer().get();
 
   {
+    VkFFTLaunchParams launchParams = {};
+    launchParams.buffer = (VkBuffer *)data->getPrimaryBuffer().get();
     VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     commandBufferAllocateInfo.commandPool = commandPool;
     commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     commandBufferAllocateInfo.commandBufferCount = 1;
-    VkCommandBuffer commandBuffer = {};
     if (vkAllocateCommandBuffers(device, &commandBufferAllocateInfo,
-                                 &commandBuffer) != VK_SUCCESS)
+                                 &commandBuffer_forward) != VK_SUCCESS)
       throw std::runtime_error(
           "FFT_C2C_2D::forward vkAllocateCommandBuffers call is failed");
 
     VkCommandBufferBeginInfo commandBufferBeginInfo = {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo) !=
+    if (vkBeginCommandBuffer(commandBuffer_forward, &commandBufferBeginInfo) !=
         VK_SUCCESS)
       throw std::runtime_error(
           "FFT_C2C_2D::forward vkBeginCommandBuffer is failed");
-    launchParams.commandBuffer = &commandBuffer;
+    launchParams.commandBuffer = &commandBuffer_forward;
 
-    // NOTE: 这里可以添加多个FFT步骤用于优化,但要更改批次数量
     if (VkFFTAppend(&app, -1, &launchParams) != VKFFT_SUCCESS)
       throw std::runtime_error("FFT_C2C_2D::forward VkFFTAppend is failed");
-    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+    if (vkEndCommandBuffer(commandBuffer_forward) != VK_SUCCESS)
       throw std::runtime_error(
           "FFT_C2C_2D::forward vkEndCommandBuffer is failed");
+  }
 
+  {
+    VkFFTLaunchParams launchParams = {};
+    launchParams.buffer = (VkBuffer *)data->getPrimaryBuffer().get();
+    VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    commandBufferAllocateInfo.commandPool = commandPool;
+    commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    commandBufferAllocateInfo.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(device, &commandBufferAllocateInfo,
+                                 &commandBuffer_inverse) != VK_SUCCESS)
+      throw std::runtime_error(
+          "FFT_C2C_2D::inverse vkAllocateCommandBuffers call is failed");
+
+    VkCommandBufferBeginInfo commandBufferBeginInfo = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(commandBuffer_inverse, &commandBufferBeginInfo) !=
+        VK_SUCCESS)
+      throw std::runtime_error(
+          "FFT_C2C_2D::inverse vkBeginCommandBuffer is failed");
+    launchParams.commandBuffer = &commandBuffer_inverse;
+
+    if (VkFFTAppend(&app, 1, &launchParams) != VKFFT_SUCCESS)
+      throw std::runtime_error("FFT_C2C_2D::inverse VkFFTAppend is failed");
+    if (vkEndCommandBuffer(commandBuffer_inverse) != VK_SUCCESS)
+      throw std::runtime_error(
+          "FFT_C2C_2D::inverse vkEndCommandBuffer is failed");
+  }
+}
+
+void FFT_C2C_2D::forward() {
+  {
     VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.pCommandBuffers = &commandBuffer_forward;
     if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
       throw std::runtime_error(
           "FFT_C2C_2D::forward vkQueueSubmit call is failed");
@@ -91,59 +122,29 @@ void FFT_C2C_2D::forward(std::shared_ptr<kp::TensorT<double>> data) {
     if (vkResetFences(device, 1, &fence) != VK_SUCCESS)
       throw std::runtime_error(
           "FFT_C2C_2D::forward vkResetFences call is failed");
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer_forward);
   }
 }
 
-void FFT_C2C_2D::inverse(std::shared_ptr<kp::TensorT<double>> data) {
-  VkFFTLaunchParams launchParams = {};
-  launchParams.buffer = (VkBuffer *)data->getPrimaryBuffer().get();
-
-  {
-    VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    commandBufferAllocateInfo.commandPool = commandPool;
-    commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    commandBufferAllocateInfo.commandBufferCount = 1;
-    VkCommandBuffer commandBuffer = {};
-    if (vkAllocateCommandBuffers(device, &commandBufferAllocateInfo,
-                                 &commandBuffer) != VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::inverse vkAllocateCommandBuffers call is failed");
-
-    VkCommandBufferBeginInfo commandBufferBeginInfo = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo) !=
-        VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::inverse vkBeginCommandBuffer is failed");
-    launchParams.commandBuffer = &commandBuffer;
-
-    // NOTE: 这里可以添加多个FFT步骤用于优化,但要更改批次数量
-    if (VkFFTAppend(&app, 1, &launchParams) != VKFFT_SUCCESS)
-      throw std::runtime_error("FFT_C2C_2D::inverse VkFFTAppend is failed");
-    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::inverse vkEndCommandBuffer is failed");
-
-    VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-    if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::inverse vkQueueSubmit call is failed");
-    if (vkWaitForFences(device, 1, &fence, VK_TRUE, 100000000000) != VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::inverse vkWaitForFences call is failed");
-    if (vkResetFences(device, 1, &fence) != VK_SUCCESS)
-      throw std::runtime_error(
-          "FFT_C2C_2D::inverse vkResetFences call is failed");
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-  }
+void FFT_C2C_2D::inverse() {
+  VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer_inverse;
+  if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::inverse vkQueueSubmit call is failed");
+  if (vkWaitForFences(device, 1, &fence, VK_TRUE, 100000000000) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::inverse vkWaitForFences call is failed");
+  if (vkResetFences(device, 1, &fence) != VK_SUCCESS)
+    throw std::runtime_error(
+        "FFT_C2C_2D::inverse vkResetFences call is failed");
 }
 
 FFT_C2C_2D::~FFT_C2C_2D() {
+  vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer_forward);
+  vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer_inverse);
+
   // 清理vkFFT应用
   deleteVkFFT(&app);
 

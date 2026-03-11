@@ -20,14 +20,20 @@ class FFT_C2C_2D {
   VkCommandPool commandPool;
 
   uint64_t bufferSize;
+  std::shared_ptr<kp::TensorT<double>> data;
+
+  VkCommandBuffer commandBuffer_forward = {};
+  VkCommandBuffer commandBuffer_inverse = {};
 
 public:
-  FFT_C2C_2D(int width, int height, const VkInstance &instance,
-             const VkPhysicalDevice &phydevice, const VkDevice &device,
-             uint32_t computeQueueFamilyIndex);
+  FFT_C2C_2D(int width, int height, std::shared_ptr<kp::TensorT<double>> data,
+             const VkInstance &instance, const VkPhysicalDevice &phydevice,
+             const VkDevice &device, uint32_t computeQueueFamilyIndex);
 
-  void forward(std::shared_ptr<kp::TensorT<double>> data);
-  void inverse(std::shared_ptr<kp::TensorT<double>> data);
+  // WARN: forward和inverse不要并发调用
+  void forward();
+  // WARN: forward和inverse不要并发调用
+  void inverse();
 
   ~FFT_C2C_2D();
 };

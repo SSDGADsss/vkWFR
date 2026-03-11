@@ -19,6 +19,8 @@ class FFT_R2C_2D {
   VkFence fence;
   VkCommandPool commandPool;
 
+  VkCommandBuffer commandBuffer = {};
+
   struct aBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -27,14 +29,15 @@ class FFT_R2C_2D {
   aBuffer calbuffer;
 
   uint64_t inputSize, outputSize, bufferSize;
+  std::shared_ptr<kp::TensorT<double>> input, output;
 
 public:
-  FFT_R2C_2D(int width, int height, const VkInstance &instance,
-             const VkPhysicalDevice &phydevice, const VkDevice &device,
-             uint32_t computeQueueFamilyIndex);
+  FFT_R2C_2D(int width, int height, std::shared_ptr<kp::TensorT<double>> input,
+             std::shared_ptr<kp::TensorT<double>> output,
+             const VkInstance &instance, const VkPhysicalDevice &phydevice,
+             const VkDevice &device, uint32_t computeQueueFamilyIndex);
 
-  void operator()(std::shared_ptr<kp::TensorT<double>> input,
-                  std::shared_ptr<kp::TensorT<double>> output);
+  void operator()();
 
   ~FFT_R2C_2D();
 };
