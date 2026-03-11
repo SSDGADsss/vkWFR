@@ -22,13 +22,8 @@ layout(binding = 1) buffer outMatrixD {
   double outMat[];
 };
 
-layout(push_constant) uniform PushConstants {
-  uint call_index;
-} pcs;
-
 void main() {
-  uint offset = pcs.call_index * BLOCK_CALLNUM;
-  uint index = offset + gl_LocalInvocationID.x;
+  uint index = gl_WorkGroupID.x * BLOCK_CALLNUM + gl_LocalInvocationID.x;
   if (index >= IMAGE_WIDTH * IMAGE_HEIGHT) return;
   uint pos_x = index % IMAGE_WIDTH;
   uint pos_y = index / IMAGE_WIDTH;

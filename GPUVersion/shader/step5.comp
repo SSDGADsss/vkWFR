@@ -9,7 +9,6 @@ layout(constant_id = 4) const int RESULT_HEIGHT = 1;
 layout(local_size_x_id = 0) in;
 
 layout(push_constant) uniform PushConstants {
-  float call_index;
   float wxt;
   float wyt;
 } pcs;
@@ -23,7 +22,7 @@ layout(binding = 1) buffer window_cal {
 };
 
 void main() {
-  int index = int(pcs.call_index) * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
+  int index = int(gl_WorkGroupID.x) * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
   if (index >= CAL_WIDTH * CAL_HEIGHT) return;
   int pos_x = index % CAL_WIDTH;
   int pos_y = index / CAL_WIDTH;

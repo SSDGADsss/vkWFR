@@ -18,12 +18,8 @@ layout(binding = 1) buffer resultData {
   double resultD[];
 };
 
-layout(push_constant) uniform PushConstants {
-  int call_index;
-} pcs;
-
 void main() {
-  int index = pcs.call_index * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
+  int index = int(gl_WorkGroupID.x) * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
   if (index >= ROI_W * ROI_H) return;
   int in_x = index % ROI_W + SX;
   int in_y = index / ROI_W + SY;

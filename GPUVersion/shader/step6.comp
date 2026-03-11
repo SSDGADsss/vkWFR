@@ -13,12 +13,8 @@ layout(binding = 1) buffer FwData {
   double Fw[];
 };
 
-layout(push_constant) uniform PushConstants {
-  int call_index;
-} pcs;
-
 void main() {
-  int index = pcs.call_index * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
+  int index = int(gl_WorkGroupID.x) * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
   if (index >= DATA_LENGTH) return;
   index *= 2;
   double res_real = Fw[index] * Ff[index] - Fw[index + 1] * Ff[index + 1];

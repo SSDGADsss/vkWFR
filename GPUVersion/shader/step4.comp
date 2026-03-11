@@ -2,18 +2,23 @@
 
 layout(constant_id = 0) const int HANDLE_BLOCK_SIZE = 1;
 layout(constant_id = 1) const int DATA_LENGTH = 1;
+layout(constant_id = 2) const int WORKGROUP_SIZE = 1;
 
 layout(local_size_x_id = 0) in;
 layout(binding = 0) buffer HandleWindow {
   double handleW[];
 };
 
-layout(push_constant) uniform PushConstants {
-  int call_index;
-} pcs;
+shared double sumval;
 
 void main() {
-  int index = pcs.call_index * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
+  if (gl_LocalInvocationIndex == 0) {
+    sumval = 0;
+    for (int i = 0; i < WORKGROUP_SIZE; i++)
+      sumval += handleW[uint(DATA_LENGTH + i)];
+  }
+  barrier();
+  int index = int(gl_WorkGroupID.x) * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
   if (index >= DATA_LENGTH) return;
-  handleW[index] /= sqrt(handleW[DATA_LENGTH]);
+  handleW[index] /= sqrt(sumval);
 }

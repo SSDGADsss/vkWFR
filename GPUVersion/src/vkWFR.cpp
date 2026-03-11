@@ -1,8 +1,5 @@
 #include "FFT_R2C_2D.hpp"
-#include "kompute/Memory.hpp"
 #include "kompute/Tensor.hpp"
-#include "kompute/operations/OpCopy.hpp"
-#include "kompute/operations/OpMult.hpp"
 #include <shader/step1.hpp>
 #include <shader/step2.hpp>
 #include <shader/step3.hpp>
@@ -35,8 +32,8 @@ const static std::vector<uint32_t> shader_step6(comp::STEP6_COMP_SPV.begin(),
 const static std::vector<uint32_t> shader_step7(comp::STEP7_COMP_SPV.begin(),
                                                 comp::STEP7_COMP_SPV.end());
 
-// TODO: 从vulkan C API获取每个工作组最大调用数
-constexpr unsigned int HandleBlockSize = 1024;
+// 工作组线程数
+constexpr unsigned int HandleBlockSize = 32;
 
 namespace kp {
 class OpMemReset : public OpBase {
@@ -185,27 +182,25 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
   mgr = std::make_unique<kp::Manager>(instance, physicalDevice, device);
 
   // 初始化高斯窗
-  GaussianWindow =
-      mgr->tensorT<double>(std::vector<double>(cal_width * cal_height + 1));
   {
+    int workgroupNum =
+        (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
+    GaussianWindow = mgr->tensorT<double>(
+        std::vector<double>(cal_width * cal_height + workgroupNum));
     std::shared_ptr<kp::Algorithm> algo1 = mgr->algorithm<int, int>(
-        {GaussianWindow}, shader_step3, kp::Workgroup({1}),
-        {HandleBlockSize, cal_width, cal_height, sigmax, sigmay}, {0});
+        {GaussianWindow}, shader_step3,
+        kp::Workgroup({(unsigned int)workgroupNum, 1, 1}),
+        {HandleBlockSize, cal_width, cal_height, sigmax, sigmay}, {});
     std::shared_ptr<kp::Sequence> recorder(
         new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    for (int i = 0;
-         i < (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
-         i++)
-      recorder->record<kp::OpAlgoDispatch>(algo1, std::vector<int>{i});
+    recorder->record<kp::OpAlgoDispatch>(algo1, std::vector<int>{});
     recorder->eval();
     // NOTE: 归一化
     std::shared_ptr<kp::Algorithm> algo2 = mgr->algorithm<int, int>(
-        {GaussianWindow}, shader_step4, kp::Workgroup({1}),
-        {HandleBlockSize, cal_width * cal_height}, {0});
-    for (int i = 0;
-         i < (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
-         i++)
-      recorder->record<kp::OpAlgoDispatch>(algo2, std::vector<int>{i});
+        {GaussianWindow}, shader_step4,
+        kp::Workgroup({(unsigned int)workgroupNum, 1, 1}),
+        {HandleBlockSize, cal_width * cal_height, workgroupNum}, {});
+    recorder->record<kp::OpAlgoDispatch>(algo2, std::vector<int>{});
     recorder->eval();
     ;
   }
@@ -225,21 +220,23 @@ std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
   std::shared_ptr<kp::TensorT<double>> calReady =
       mgr->tensorT<double>(std::vector<double>(mm * nn, 0));
   {
+    int workgroupNum =
+        (imgWidth * imgHeight + HandleBlockSize - 1) / HandleBlockSize;
     // 这个用完后就没用了
     std::shared_ptr<kp::TensorT<unsigned char>> tensorIn =
         mgr->tensorT<unsigned char>(std::move(image));
     std::shared_ptr<kp::Algorithm> algo =
         mgr->algorithm<unsigned int, unsigned int>(
-            {tensorIn, calReady}, shader_step1, kp::Workgroup({1}),
+            {tensorIn, calReady}, shader_step1,
+            kp::Workgroup({(unsigned int)workgroupNum, 1, 1}),
             {(unsigned int)imgWidth, (unsigned int)imgHeight, HandleBlockSize,
              (unsigned)ROI[0], (unsigned)ROI[1], (unsigned)ROI[2],
              (unsigned)ROI[3], (unsigned)mm, (unsigned)nn},
-            {0});
+            {});
     std::shared_ptr<kp::Sequence> recorder(
         new kp::Sequence(physicalDevice, device, compute_queue, 0));
     recorder->record<kp::OpSyncDevice>({tensorIn, calReady});
-    for (unsigned int i = 0; i < imgWidth * imgHeight / HandleBlockSize; i++)
-      recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{i});
+    recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{});
     recorder->eval();
   }
 
@@ -251,17 +248,18 @@ std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
   // NOTE: 完成Hermitian对称性
   {
     const int HandleWidth = mm / 2;
+    const int workgroupNum =
+        (HandleWidth * nn + HandleBlockSize - 1) / HandleBlockSize;
     std::shared_ptr<kp::Algorithm> algo =
         mgr->algorithm<unsigned int, unsigned int>(
-            {FfBuffer}, shader_step2, kp::Workgroup({1}),
+            {FfBuffer}, shader_step2,
+            kp::Workgroup({(unsigned int)workgroupNum, 1, 1}),
             {HandleBlockSize, (unsigned)mm, (unsigned)nn,
              (unsigned)HandleWidth},
-            {0});
+            {});
     std::shared_ptr<kp::Sequence> recorder(
         new kp::Sequence(physicalDevice, device, compute_queue, 0));
-    for (unsigned i = 0;
-         i < (HandleWidth * nn + HandleBlockSize - 1) / HandleBlockSize; i++)
-      recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{i});
+    recorder->record<kp::OpAlgoDispatch>(algo, std::vector<unsigned int>{});
     recorder->eval();
   }
 
@@ -270,36 +268,36 @@ std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
   std::shared_ptr<kp::TensorT<double>> w_expanded =
       mgr->tensorT<double>(std::vector<double>(mm * nn * 2, 0));
   std::shared_ptr<kp::Algorithm> algo_cal_w = mgr->algorithm<int, float>(
-      {GaussianWindow, w_expanded}, shader_step5, kp::Workgroup({1}),
+      {GaussianWindow, w_expanded}, shader_step5,
+      kp::Workgroup(
+          {(cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize, 1,
+           1}),
       std::vector<int>{HandleBlockSize, cal_width, cal_height, (int)mm,
                        (int)nn},
-      {0, 0, 0});
+      {0, 0});
   std::shared_ptr<kp::Algorithm> algo_cal_mulmatrix = mgr->algorithm<int, int>(
-      {FfBuffer, w_expanded}, shader_step6, kp::Workgroup({1}),
-      std::vector<int>{HandleBlockSize, (int)mm * (int)nn}, {0});
+      {FfBuffer, w_expanded}, shader_step6,
+      kp::Workgroup({(mm * nn + HandleBlockSize - 1) / HandleBlockSize, 1, 1}),
+      std::vector<int>{HandleBlockSize, (int)mm * (int)nn}, {});
   std::shared_ptr<kp::Algorithm> algo_cal_ridge = mgr->algorithm<int, int>(
-      {w_expanded, result_ridge}, shader_step7, kp::Workgroup({1}),
+      {w_expanded, result_ridge}, shader_step7,
+      kp::Workgroup(
+          {(ROI[2] * ROI[3] + HandleBlockSize - 1) / HandleBlockSize, 1, 1}),
       std::vector<int>{HandleBlockSize, (int)mm, (int)nn, sx, sy, (int)ROI[2],
                        (int)ROI[3]},
-      {0});
+      {});
   std::shared_ptr<kp::OpBase> memreset = std::make_shared<kp::OpMemReset>(
       std::vector<std::shared_ptr<kp::TensorT<double>>>{w_expanded});
 
   for (float wyt = wyl; wyt <= wyh + 1e-10; wyt += wyi) {
     for (float wxt = wxl; wxt <= wxh + 1e-10; wxt += wxi) {
-      // 复数矩阵
+      // NOTE: 计算基函数
       {
         std::shared_ptr<kp::Sequence> recorder(
             new kp::Sequence(physicalDevice, device, compute_queue, 0));
-        // 这步弄完后就是GPU上就是全0了
-        // NOTE: 这里可以用vkCmdFillBuffer优化掉
         recorder->record(memreset);
-        for (unsigned i = 0;
-             i <
-             (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
-             i++)
-          recorder->record<kp::OpAlgoDispatch>(
-              algo_cal_w, std::vector<float>{(float)i, wxt, wyt});
+        recorder->record<kp::OpAlgoDispatch>(algo_cal_w,
+                                             std::vector<float>{wxt, wyt});
         recorder->eval();
       }
       // NOTE: 计算频谱
@@ -309,10 +307,8 @@ std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
       {
         std::shared_ptr<kp::Sequence> recorder(
             new kp::Sequence(physicalDevice, device, compute_queue, 0));
-        for (int i = 0; i < (mm * nn + HandleBlockSize - 1) / HandleBlockSize;
-             i++)
-          recorder->record<kp::OpAlgoDispatch>(algo_cal_mulmatrix,
-                                               std::vector<int>{i});
+        recorder->record<kp::OpAlgoDispatch>(algo_cal_mulmatrix,
+                                             std::vector<int>{});
         recorder->eval();
       }
 
@@ -323,10 +319,8 @@ std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
       {
         std::shared_ptr<kp::Sequence> recorder(
             new kp::Sequence(physicalDevice, device, compute_queue, 0));
-        for (int i = 0;
-             i < (ROI[2] * ROI[3] + HandleBlockSize - 1) / HandleBlockSize; i++)
-          recorder->record<kp::OpAlgoDispatch>(algo_cal_ridge,
-                                               std::vector<int>{i});
+        recorder->record<kp::OpAlgoDispatch>(algo_cal_ridge,
+                                             std::vector<int>{});
         recorder->record<kp::OpSyncLocal>({result_ridge})->eval();
       }
     }

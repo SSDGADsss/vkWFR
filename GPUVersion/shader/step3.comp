@@ -25,7 +25,7 @@ void main() {
     sum_counter = 0;
   barrier();
 
-  int index = HANDLE_BLOCK_SIZE * pcs.call_index + int(gl_LocalInvocationIndex);
+  int index = HANDLE_BLOCK_SIZE * int(gl_WorkGroupID.x) + int(gl_LocalInvocationIndex);
   if (index >= WINDOWS_WIDTH * WINDOWS_HEIGHT) return;
 
   int pos_x = index % WINDOWS_WIDTH;
@@ -43,5 +43,8 @@ void main() {
   atomicAdd(sum_counter, calres * calres);
   barrier();
   if (gl_LocalInvocationIndex == 0)
-    outW[WINDOWS_WIDTH * WINDOWS_HEIGHT] += sum_counter;
+  {
+    outW[WINDOWS_WIDTH * WINDOWS_HEIGHT + int(gl_WorkGroupID.x)] += sum_counter;
+    memoryBarrierBuffer();
+  }
 }
