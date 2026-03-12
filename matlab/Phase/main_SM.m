@@ -11,10 +11,10 @@ x1 = 1:L;
 y1 = 1:H;
 [X,Y] = meshgrid(x1,y1);
 %添加变形相位场
-u=0.0005*X;
-%kk=0.3;
-%v=0.01*Y+kk*peaks(H);
-v=0.0005*Y;
+u=0.5*X+peaks(H);
+kk=2;
+v=0.1*Y+kk*peaks(H);
+% v=0.0005*Y;
 % figure;imagesc(v);title('real_v');colorbar
 ImgRef = a + b/2* cos(2* pi* f0* X)+ b/2* cos(2* pi* f0* Y);
 ImgRef=ImgRef+5*randn(H,L);

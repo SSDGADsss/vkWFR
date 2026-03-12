@@ -72,7 +72,5 @@ int main() {
   RunBenchmark("Phase/2048x2048_1.bmp", false);
   RunBenchmark("Phase/4096x4096_1.bmp", true);
   RunBenchmark("Phase/4096x4096_1.bmp", false);
-  RunBenchmark("Phase/8192x8192_1.bmp", true);
-  RunBenchmark("Phase/8192x8192_1.bmp", false);
   return 0;
 }
