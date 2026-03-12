@@ -11,7 +11,7 @@ layout(constant_id = 4) const int Y_SIZE = 1;
 
 layout(local_size_x_id = 0) in;
 layout(binding = 0) buffer outWindow {
-  double outW[];
+  float outW[];
 };
 
 layout(push_constant) uniform PushConstants {

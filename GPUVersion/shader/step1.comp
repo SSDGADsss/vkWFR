@@ -19,7 +19,7 @@ layout(binding = 0) buffer inImage {
   uint8_t inputI[];
 };
 layout(binding = 1) buffer outMatrixD {
-  double outMat[];
+  float outMat[];
 };
 
 void main() {

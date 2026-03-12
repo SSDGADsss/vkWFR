@@ -29,11 +29,11 @@ class FFT_R2C_2D {
   aBuffer calbuffer;
 
   uint64_t inputSize, outputSize, bufferSize;
-  std::shared_ptr<kp::TensorT<double>> input, output;
+  std::shared_ptr<kp::TensorT<float>> input, output;
 
 public:
-  FFT_R2C_2D(int width, int height, std::shared_ptr<kp::TensorT<double>> input,
-             std::shared_ptr<kp::TensorT<double>> output,
+  FFT_R2C_2D(int width, int height, std::shared_ptr<kp::TensorT<float>> input,
+             std::shared_ptr<kp::TensorT<float>> output,
              const VkInstance &instance, const VkPhysicalDevice &phydevice,
              const VkDevice &device, uint32_t computeQueueFamilyIndex);
 

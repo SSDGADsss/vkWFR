@@ -15,11 +15,11 @@ layout(push_constant) uniform PushConstants {
 } pcs;
 
 layout(binding = 0) buffer window_base {
-  double w0[];
+  float w0[];
 };
 
 layout(binding = 1) buffer window_cal {
-  double w_out[];
+  float w_out[];
 };
 
 void main() {

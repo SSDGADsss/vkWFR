@@ -36,7 +36,7 @@ int main() {
                  0.5,  // wyh
                  0.0); // thr (对于WFR不需要)
 
-    std::vector<double> result;
+    std::vector<float> result;
 
     std::cout << "Please input any key to continue" << std::endl;
     std::cin.get();
@@ -65,7 +65,7 @@ int main() {
                  1,    // wyh
                  0.0); // thr (对于WFR不需要)
 
-    std::vector<double> result;
+    std::vector<float> result;
 
     std::cout << "Please input any key to continue" << std::endl;
     std::cin.get();

@@ -49,10 +49,10 @@ constexpr unsigned int FreqCalParallelNumber = 10;
 
 namespace kp {
 class OpMemReset : public OpBase {
-  std::vector<std::shared_ptr<TensorT<double>>> mTensors;
+  std::vector<std::shared_ptr<TensorT<float>>> mTensors;
 
 public:
-  OpMemReset(const std::vector<std::shared_ptr<TensorT<double>>> buffObjs)
+  OpMemReset(const std::vector<std::shared_ptr<TensorT<float>>> buffObjs)
       : mTensors(buffObjs) {}
 
   ~OpMemReset() override {}
@@ -69,8 +69,8 @@ public:
 } // namespace kp
 
 vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
-             double wxl, double wxi, double wxh, int sigmay, double wyl,
-             double wyi, double wyh, double thr)
+             float wxl, float wxi, float wxh, int sigmay, float wyl, float wyi,
+             float wyh, float thr)
     : imgWidth(imgwidth_), imgHeight(imgheight_), ROI(ROI_),
       sx(static_cast<int>(std::round(3 * sigmax))),
       sy(static_cast<int>(std::round(3 * sigmay))),
@@ -207,8 +207,8 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
     // NOTE: 初始化高斯窗
     int workgroupNum =
         (cal_width * cal_height + HandleBlockSize - 1) / HandleBlockSize;
-    GaussianWindow = mgr->tensorT<double>(
-        std::vector<double>(cal_width * cal_height + workgroupNum));
+    GaussianWindow = mgr->tensorT<float>(
+        std::vector<float>(cal_width * cal_height + workgroupNum));
     std::shared_ptr<kp::Algorithm> algo1 = mgr->algorithm<int, int>(
         {GaussianWindow}, shader_step3,
         kp::Workgroup({(unsigned int)workgroupNum, 1, 1}),
@@ -226,9 +226,9 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
     recorder->eval();
     ;
   }
-  FfBuffer = mgr->tensorT<double>(std::vector<double>(mm * nn * 2));
-  result_ridge = mgr->tensorT<double>(std::vector<double>(ROI[2] * ROI[3]));
-  calReady = mgr->tensorT<double>(std::vector<double>(mm * nn));
+  FfBuffer = mgr->tensorT<float>(std::vector<float>(mm * nn * 2));
+  result_ridge = mgr->tensorT<float>(std::vector<float>(ROI[2] * ROI[3]));
+  calReady = mgr->tensorT<float>(std::vector<float>(mm * nn));
   tensorIn = mgr->tensorT<unsigned char>(
       std::vector<unsigned char>(imgWidth * imgHeight));
 
@@ -249,8 +249,7 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
                      1, 1}),
       {HandleBlockSize, (unsigned)mm, (unsigned)nn, (unsigned)mm / 2}, {});
   initMem = std::make_shared<kp::OpMemReset>(
-      std::vector<std::shared_ptr<kp::TensorT<double>>>{result_ridge,
-                                                        calReady});
+      std::vector<std::shared_ptr<kp::TensorT<float>>>{result_ridge, calReady});
 
   {
     recorder_init = std::shared_ptr<kp::Sequence>(
@@ -273,8 +272,8 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
                                          raw_device, computeQueueFamilyIndex);
   for (int i = 0; i < FreqCalParallelNumber; i++) {
     auto &freqcal = FreqCalPool[i];
-    freqcal.w_expanded = mgr->tensorT<double>(std::vector<double>(mm * nn * 2));
-    freqcal.result = mgr->tensorT<double>(std::vector<double>(mm * nn));
+    freqcal.w_expanded = mgr->tensorT<float>(std::vector<float>(mm * nn * 2));
+    freqcal.result = mgr->tensorT<float>(std::vector<float>(mm * nn));
     freqcal.memreset = std::make_shared<kp::OpMemReset>(
         std::vector<decltype(freqcal.w_expanded)>{freqcal.w_expanded,
                                                   freqcal.result});
@@ -341,7 +340,7 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
   recorder_allfinish->record<kp::OpSyncLocal>({result_ridge});
 }
 
-std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
+std::vector<float> vkWFR::operator()(std::vector<unsigned char> image) {
   if (image.size() != imgWidth * imgHeight)
     throw std::runtime_error(
         "vkWFR::operator input image size not equal imgWidth*imgHeight");
@@ -399,8 +398,8 @@ std::vector<double> vkWFR::operator()(std::vector<unsigned char> image) {
     recorder_mergeResult->eval();
   }
   recorder_allfinish->eval();
-  std::vector<double> result(ROI[2] * ROI[3]);
-  memcpy(result.data(), result_ridge->data(), ROI[2] * ROI[3] * sizeof(double));
+  std::vector<float> result(ROI[2] * ROI[3]);
+  memcpy(result.data(), result_ridge->data(), ROI[2] * ROI[3] * sizeof(float));
   return result;
 }
 

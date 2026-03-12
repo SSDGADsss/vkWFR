@@ -32,14 +32,14 @@ class vkWFR {
   const int sx, sy;
   const int cal_width, cal_height;
   const int sigmax, sigmay;
-  const double wxl, wxi, wxh, wyl, wyi, wyh, thr;
+  const float wxl, wxi, wxh, wyl, wyi, wyh, thr;
 
   std::vector<std::array<float, 3>> calFreqList;
 
   struct FreqPipeline {
     std::unique_ptr<FFT_C2C_2D> fft_c2c;
-    std::shared_ptr<kp::TensorT<double>> w_expanded;
-    std::shared_ptr<kp::TensorT<double>> result;
+    std::shared_ptr<kp::TensorT<float>> w_expanded;
+    std::shared_ptr<kp::TensorT<float>> result;
     std::shared_ptr<kp::Sequence> recorder_mulmatrix;
     std::shared_ptr<kp::Sequence> recorder_cal_ridge;
     std::shared_ptr<kp::Sequence> recorder_base_func;
@@ -51,10 +51,10 @@ class vkWFR {
 
   std::vector<FreqPipeline> FreqCalPool;
 
-  std::shared_ptr<kp::TensorT<double>> GaussianWindow;
-  std::shared_ptr<kp::TensorT<double>> FfBuffer;
-  std::shared_ptr<kp::TensorT<double>> result_ridge;
-  std::shared_ptr<kp::TensorT<double>> calReady;
+  std::shared_ptr<kp::TensorT<float>> GaussianWindow;
+  std::shared_ptr<kp::TensorT<float>> FfBuffer;
+  std::shared_ptr<kp::TensorT<float>> result_ridge;
+  std::shared_ptr<kp::TensorT<float>> calReady;
   std::shared_ptr<kp::TensorT<unsigned char>> tensorIn;
 
   std::shared_ptr<kp::Algorithm> algo_cal_hermitian;
@@ -72,11 +72,11 @@ class vkWFR {
 
 public:
   vkWFR(int imgwidth, int imgheight, std::array<int, 4> ROI, int sigmax,
-        double wxl, double wxi, double wxh, int sigmay, double wyl, double wyi,
-        double wyh, double thr);
+        float wxl, float wxi, float wxh, int sigmay, float wyl, float wyi,
+        float wyh, float thr);
   ~vkWFR();
 
-  std::vector<double> operator()(std::vector<unsigned char> image);
+  std::vector<float> operator()(std::vector<unsigned char> image);
 };
 
 #endif

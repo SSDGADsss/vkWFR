@@ -11,11 +11,11 @@ layout(constant_id = 6) const int ROI_H = 1;
 layout(local_size_x_id = 0) in;
 
 layout(binding = 0) buffer compData {
-  double compD[];
+  float compD[];
 };
 
 layout(binding = 1) buffer resultData {
-  double resultD[];
+  float resultD[];
 };
 
 void main() {

@@ -9,7 +9,7 @@ layout(constant_id = 3) const uint HANDLE_WIDTH = 1;
 
 layout(local_size_x_id = 0) in;
 layout(binding = 0) buffer inImage {
-  double inputI[];
+  float inputI[];
 };
 
 void main() {

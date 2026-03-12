@@ -6,19 +6,19 @@ layout(constant_id = 1) const int DATA_LENGTH = 1;
 layout(local_size_x_id = 0) in;
 
 layout(binding = 0) buffer FfData {
-  double Ff[];
+  float Ff[];
 };
 
 layout(binding = 1) buffer FwData {
-  double Fw[];
+  float Fw[];
 };
 
 void main() {
   int index = int(gl_WorkGroupID.x) * HANDLE_BLOCK_SIZE + int(gl_LocalInvocationIndex);
   if (index >= DATA_LENGTH) return;
   index *= 2;
-  double res_real = Fw[index] * Ff[index] - Fw[index + 1] * Ff[index + 1];
-  double res_impl = Fw[index] * Ff[index + 1] + Fw[index + 1] * Ff[index];
+  float res_real = Fw[index] * Ff[index] - Fw[index + 1] * Ff[index + 1];
+  float res_impl = Fw[index] * Ff[index + 1] + Fw[index + 1] * Ff[index];
   Fw[index] = res_real;
   Fw[index + 1] = res_impl;
 }

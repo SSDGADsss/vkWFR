@@ -6,10 +6,10 @@ layout(constant_id = 2) const int WORKGROUP_SIZE = 1;
 
 layout(local_size_x_id = 0) in;
 layout(binding = 0) buffer HandleWindow {
-  double handleW[];
+  float handleW[];
 };
 
-shared double sumval;
+shared float sumval;
 
 void main() {
   if (gl_LocalInvocationIndex == 0) {

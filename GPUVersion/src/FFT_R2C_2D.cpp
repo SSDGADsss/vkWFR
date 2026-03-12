@@ -76,18 +76,18 @@ static VkBuffer createStorageBuffer(VkDevice device,
 }
 
 FFT_R2C_2D::FFT_R2C_2D(int width_, int height_,
-                       std::shared_ptr<kp::TensorT<double>> input_,
-                       std::shared_ptr<kp::TensorT<double>> output_,
+                       std::shared_ptr<kp::TensorT<float>> input_,
+                       std::shared_ptr<kp::TensorT<float>> output_,
                        const VkInstance &instance_,
                        const VkPhysicalDevice &phydevice_,
                        const VkDevice &device_,
                        uint32_t computeQueueFamilyIndex)
     : instance(instance_), phydevice(phydevice_), device(device_),
       width(width_), height(height_),
-      inputSize(sizeof(double) * width_ * height_),
-      outputSize(sizeof(double) * width_ * height_ * 2),
-      bufferSize(sizeof(double) * 2 * (width_ / 2 + 1) * height_),
-      input(input_), output(output_) {
+      inputSize(sizeof(float) * width_ * height_),
+      outputSize(sizeof(float) * width_ * height_ * 2),
+      bufferSize(sizeof(float) * 2 * (width_ / 2 + 1) * height_), input(input_),
+      output(output_) {
   memset(&configuration, 0, sizeof(configuration));
   memset(&app, 0, sizeof(app));
 
@@ -117,7 +117,7 @@ FFT_R2C_2D::FFT_R2C_2D(int width_, int height_,
   configuration.numberBatches = 1;
   configuration.performR2C = 1;
   configuration.performDCT = 0;
-  configuration.doublePrecision = 1;
+  configuration.doublePrecision = 0;
 
   configuration.isInputFormatted = 1;
   configuration.inputBufferNum = 1;

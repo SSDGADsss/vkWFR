@@ -5,13 +5,13 @@
 #include <vulkan/vulkan.h>
 
 FFT_C2C_2D::FFT_C2C_2D(int width_, int height_,
-                       std::shared_ptr<kp::TensorT<double>> data_,
+                       std::shared_ptr<kp::TensorT<float>> data_,
                        const VkInstance &instance_,
                        const VkPhysicalDevice &phydevice_,
                        const VkDevice &device_,
                        uint32_t computeQueueFamilyIndex)
     : instance(instance_), phydevice(phydevice_), device(device_),
-      width(width_), height(height_), bufferSize(16 * width_ * height_),
+      width(width_), height(height_), bufferSize(8 * width_ * height_),
       data(data_) {
   memset(&configuration, 0, sizeof(configuration));
   memset(&app, 0, sizeof(app));
@@ -40,7 +40,7 @@ FFT_C2C_2D::FFT_C2C_2D(int width_, int height_,
   configuration.size[0] = width;
   configuration.size[1] = height;
   configuration.numberBatches = 1;
-  configuration.doublePrecision = 1;
+  configuration.doublePrecision = 0;
   configuration.normalize = 1; // 归一化
 
   configuration.bufferSize = &bufferSize;
