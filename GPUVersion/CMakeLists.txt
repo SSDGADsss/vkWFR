@@ -12,8 +12,6 @@ HINTS
   /usr/include/glslang/Include/
   /usr/local/include/glslang/Include/
 REQUIRED)
-find_package(FFTW3 REQUIRED)
-find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(Vulkan REQUIRED)
 find_package(glslang REQUIRED)
 
@@ -91,8 +89,6 @@ include_directories(
   ${GLSLANG_HEADER_PATH}
 )
 link_libraries(
-  ${FFTW3_LIBRARIES}
-  Eigen3::Eigen
   shader
   kompute::kompute
   SPIRV
