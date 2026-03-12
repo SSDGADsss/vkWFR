@@ -82,8 +82,7 @@ target_include_directories(shader
   INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 add_library(VkFFT INTERFACE)
-target_compile_definitions(VkFFT INTERFACE
-  -DVKFFT_BACKEND=0)
+target_compile_definitions(VkFFT INTERFACE VKFFT_BACKEND=0)
 
 aux_source_directory(src SOURCE_DIR)
 
@@ -101,7 +100,7 @@ link_libraries(
   Vulkan::Vulkan
   VkFFT
 )
-add_compile_definitions(-DVK_API_VERSION=13)
+add_compile_definitions(VK_API_VERSION=13)
 add_executable(${PROJECT_NAME} run/main.cpp ${SOURCE_DIR})
 add_executable(largeImage run/largeImage.cpp ${SOURCE_DIR})
 add_executable(smallImage run/smallImage.cpp ${SOURCE_DIR})
