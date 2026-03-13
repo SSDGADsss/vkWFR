@@ -20,8 +20,8 @@ int main() {
   assert(img_comp == 3);
 
   // NOTE: 这里+1是为了对应Matlab范围，那个imcrop会在宽度上+1
-  constexpr unsigned int roi_startX = 123, roi_startY = 198, roi_width = 141,
-                         roi_height = 165;
+  constexpr unsigned int roi_startX = 123, roi_startY = 198, roi_width = 142,
+                         roi_height = 166;
 
   cpuWFR wfrobj(img_width, img_height,
                 {roi_startX, roi_startY, roi_width, roi_height},

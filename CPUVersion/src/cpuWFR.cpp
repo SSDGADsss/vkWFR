@@ -2,6 +2,7 @@
 #include <cpuWFR.hpp>
 #include <cstring>
 #include <fftw3.h>
+#include <omp.h>
 
 cpuWFR::cpuWFR(int imgwidth, int imgheight, std::array<int, 4> ROI, int sigmax,
                float wxl, float wxi, float wxh, int sigmay, float wyl,
@@ -15,20 +16,37 @@ cpuWFR::cpuWFR(int imgwidth, int imgheight, std::array<int, 4> ROI, int sigmax,
       mm(ROI[2] + 2 * static_cast<int>(std::round(3 * sigmax))),
       nn(ROI[3] + 2 * static_cast<int>(std::round(3 * sigmay))) {
 
+  calFreqList.reserve(((wyh + 1e-10 - wyl) / wyi + 1) *
+                      ((wyh + 1e-10 - wyl) / wyi + 1));
+  for (float wyt = wyl; wyt <= wyh + 1e-10; wyt += wyi)
+    for (float wxt = wxl; wxt <= wxh + 1e-10; wxt += wxi)
+      calFreqList.push_back({wxt, wyt});
+
+  ParallelPool.resize(omp_get_max_threads());
+  for (auto &i : ParallelPool) {
+    i.freq_handle_in =
+        (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
+    i.freq_handle_out =
+        (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
+    i.ifreq_handle_in =
+        (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
+    i.ifreq_handle_out =
+        (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
+
+    i.freq_plan = fftw_plan_dft_2d(mm, nn, i.freq_handle_in, i.freq_handle_out,
+                                   FFTW_FORWARD, FFTW_ESTIMATE);
+    i.ifreq_plan =
+        fftw_plan_dft_2d(mm, nn, i.ifreq_handle_in, i.ifreq_handle_out,
+                         FFTW_BACKWARD, FFTW_ESTIMATE);
+  }
+
+  omp_set_num_threads(omp_get_max_threads());
+
   pre_handle_in = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
   pre_handle_out = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
-  freq_handle_in = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
-  freq_handle_out = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
-  ifreq_handle_in = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
-  ifreq_handle_out =
-      (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * mm * nn);
 
   pre_plan = fftw_plan_dft_2d(mm, nn, pre_handle_in, pre_handle_out,
                               FFTW_FORWARD, FFTW_ESTIMATE);
-  freq_plan = fftw_plan_dft_2d(mm, nn, freq_handle_in, freq_handle_out,
-                               FFTW_FORWARD, FFTW_ESTIMATE);
-  ifreq_plan = fftw_plan_dft_2d(mm, nn, ifreq_handle_in, ifreq_handle_out,
-                                FFTW_BACKWARD, FFTW_ESTIMATE);
 
   calReady.resize(mm * nn * 2);
   GaussianWindow.resize(cal_height * cal_width);
@@ -80,20 +98,27 @@ cpuWFR::cpuWFR(int imgwidth, int imgheight, std::array<int, 4> ROI, int sigmax,
 
 cpuWFR::~cpuWFR() {
   fftw_destroy_plan(pre_plan);
-  fftw_destroy_plan(freq_plan);
-  fftw_destroy_plan(ifreq_plan);
 
   fftw_free(pre_handle_in);
-  fftw_free(freq_handle_in);
-  fftw_free(ifreq_handle_in);
   fftw_free(pre_handle_out);
-  fftw_free(freq_handle_out);
-  fftw_free(ifreq_handle_out);
+
+  for (auto &i : ParallelPool) {
+    fftw_destroy_plan(i.freq_plan);
+    fftw_destroy_plan(i.ifreq_plan);
+    fftw_free(i.ifreq_handle_in);
+    fftw_free(i.ifreq_handle_out);
+    fftw_free(i.freq_handle_in);
+    fftw_free(i.freq_handle_out);
+  }
 }
 
 std::vector<double> cpuWFR::operator()(std::vector<unsigned char> image) {
+  omp_lock_t lock;
+  omp_init_lock(&lock);
+
   memset(pre_handle_in, 0, sizeof(fftw_complex) * mm * nn);
 
+#pragma omp parallel for
   for (int y = 0; y < ROI[3]; y++)
     for (int x = 0; x < ROI[2]; x++)
       pre_handle_in[x * nn + y][0] =
@@ -103,48 +128,65 @@ std::vector<double> cpuWFR::operator()(std::vector<unsigned char> image) {
   fftw_execute(pre_plan);
 
   memset(result_ridge.data(), 0, sizeof(double) * ROI[2] * ROI[3]);
-  for (double wyt = wyl; wyt <= wyh + 1e-10; wyt += wyi) {
-    for (double wxt = wxl; wxt <= wxh + 1e-10; wxt += wxi) {
-      memset(freq_handle_in, 0, sizeof(double) * mm * nn * 2);
-      for (int i = 0; i < cal_width; ++i) {
-        for (int j = 0; j < cal_height; ++j) {
-          const double impl = wxt * (i - (cal_width - 1) / 2) +
-                              wyt * (j - (cal_height - 1) / 2);
-          freq_handle_in[i * nn + j][0] =
-              GaussianWindow[i * cal_height + j] * cos(impl);
-          freq_handle_in[i * nn + j][1] =
-              GaussianWindow[i * cal_height + j] * sin(impl);
-        }
+
+  const int freqListSize = calFreqList.size();
+
+#pragma omp parallel for
+  for (int freq_index = 0; freq_index < freqListSize; freq_index++) {
+    auto &fft_obj = ParallelPool[omp_get_thread_num()];
+
+    memset(fft_obj.freq_handle_in, 0, sizeof(double) * mm * nn * 2);
+
+    for (int i = 0; i < cal_width; ++i) {
+      for (int j = 0; j < cal_height; ++j) {
+        const double impl =
+            calFreqList[freq_index][0] * (i - (cal_width - 1) / 2) +
+            calFreqList[freq_index][1] * (j - (cal_height - 1) / 2);
+        fft_obj.freq_handle_in[i * nn + j][0] =
+            GaussianWindow[i * cal_height + j] * cos(impl);
+        fft_obj.freq_handle_in[i * nn + j][1] =
+            GaussianWindow[i * cal_height + j] * sin(impl);
       }
+    }
 
-      fftw_execute(freq_plan);
+    fftw_execute(fft_obj.freq_plan);
 
-      for (int i = 0; i < mm * nn; i++) {
-        ifreq_handle_in[i][0] = (pre_handle_out[i][0] * freq_handle_out[i][0] -
-                                 pre_handle_out[i][1] * freq_handle_out[i][1]);
-        ifreq_handle_in[i][1] = (pre_handle_out[i][0] * freq_handle_out[i][1] +
-                                 pre_handle_out[i][1] * freq_handle_out[i][0]);
-      }
+    for (int i = 0; i < mm * nn; i++) {
+      fft_obj.ifreq_handle_in[i][0] =
+          (pre_handle_out[i][0] * fft_obj.freq_handle_out[i][0] -
+           pre_handle_out[i][1] * fft_obj.freq_handle_out[i][1]);
+      fft_obj.ifreq_handle_in[i][1] =
+          (pre_handle_out[i][0] * fft_obj.freq_handle_out[i][1] +
+           pre_handle_out[i][1] * fft_obj.freq_handle_out[i][0]);
+    }
 
-      fftw_execute(ifreq_plan);
-      for (int i = 0; i < mm * nn; i++) {
-        ifreq_handle_out[i][0] /= mm * nn;
-        ifreq_handle_out[i][1] /= mm * nn;
-      }
+    fftw_execute(fft_obj.ifreq_plan);
 
+    for (int i = 0; i < mm * nn; i++) {
+      fft_obj.ifreq_handle_out[i][0] /= mm * nn;
+      fft_obj.ifreq_handle_out[i][1] /= mm * nn;
+    }
+
+    {
+      omp_set_lock(&lock);
       for (int i = 0; i < ROI[2]; i++)
         for (int j = 0; j < ROI[3]; j++)
           result_ridge[i * ROI[3] + j] = std::max(
-              std::sqrt(ifreq_handle_out[(sx + i) * nn + (sy + j)][0] *
-                            ifreq_handle_out[(sx + i) * nn + (sy + j)][0] +
-                        ifreq_handle_out[(sx + i) * nn + (sy + j)][1] *
-                            ifreq_handle_out[(sx + i) * nn + (sy + j)][1]),
+              std::sqrt(
+                  fft_obj.ifreq_handle_out[(sx + i) * nn + (sy + j)][0] *
+                      fft_obj.ifreq_handle_out[(sx + i) * nn + (sy + j)][0] +
+                  fft_obj.ifreq_handle_out[(sx + i) * nn + (sy + j)][1] *
+                      fft_obj.ifreq_handle_out[(sx + i) * nn + (sy + j)][1]),
               result_ridge[i * ROI[3] + j]);
+      omp_unset_lock(&lock);
     }
   }
 
+  omp_destroy_lock(&lock);
+
   std::vector<double> result(result_ridge.size());
   // 这里转回行优先
+#pragma omp parallel for
   for (int i = 0; i < ROI[2]; i++)
     for (int j = 0; j < ROI[3]; j++)
       result[j * ROI[2] + i] = result_ridge[i * ROI[3] + j];

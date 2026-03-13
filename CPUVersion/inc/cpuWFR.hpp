@@ -16,14 +16,25 @@ class cpuWFR {
   const std::array<int, 4> ROI;
 
   fftw_complex *pre_handle_in = nullptr, *pre_handle_out = nullptr;
-  fftw_complex *freq_handle_in = nullptr, *freq_handle_out = nullptr;
-  fftw_complex *ifreq_handle_in = nullptr, *ifreq_handle_out = nullptr;
 
-  fftw_plan pre_plan, freq_plan, ifreq_plan;
+  fftw_plan pre_plan;
 
   std::vector<double> calReady;       // mm*nn*2
   std::vector<double> GaussianWindow; // cal_width*cal_height
   std::vector<double> result_ridge;
+
+  std::vector<std::array<float, 2>> calFreqList;
+
+  struct Parallel_Freq {
+    fftw_complex *freq_handle_in;
+    fftw_complex *freq_handle_out;
+    fftw_complex *ifreq_handle_in;
+    fftw_complex *ifreq_handle_out;
+    fftw_plan freq_plan;
+    fftw_plan ifreq_plan;
+  };
+
+  std::vector<Parallel_Freq> ParallelPool;
 
 public:
   cpuWFR(int imgwidth, int imgheight, std::array<int, 4> ROI, int sigmax,
