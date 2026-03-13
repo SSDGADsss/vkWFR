@@ -40,7 +40,7 @@ void RunBenchmark(std::string filepath, bool smallPara) {
 
   std::cout << "Test Start: " << filepath << " with "
             << (smallPara ? "small" : "big") << " param" << std::endl;
-  std::vector<double> result;
+  std::vector<float> result;
   auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < 100; i++)
     result = (*algo)(std::vector<unsigned char>(

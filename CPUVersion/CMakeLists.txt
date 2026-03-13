@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 find_file(STB_HEADER stb/stb_image.h REQUIRED)
-find_package(FFTW3 REQUIRED)
+find_package(FFTW3f REQUIRED HINTS /usr/lib64/cmake/fftw3)
 find_package(OpenMP REQUIRED)
 
 if(${CMAKE_BUILD_TYPE} MATCHES "Release")
@@ -21,11 +21,11 @@ include_directories(inc)
 
 add_executable(${PROJECT_NAME} run/main.cpp ${SOURCE_DIR})
 target_include_directories(${PROJECT_NAME} PUBLIC inc)
-target_link_libraries(${PROJECT_NAME} ${FFTW3_LIBRARIES} OpenMP::OpenMP_CXX)
+target_link_libraries(${PROJECT_NAME} ${FFTW3f_LIBRARIES} OpenMP::OpenMP_CXX)
 
 add_executable(CPUBenchmark run/benchmark.cpp ${SOURCE_DIR})
 target_include_directories(CPUBenchmark PUBLIC inc)
-target_link_libraries(CPUBenchmark ${FFTW3_LIBRARIES} OpenMP::OpenMP_CXX)
+target_link_libraries(CPUBenchmark ${FFTW3f_LIBRARIES} OpenMP::OpenMP_CXX)
 
 # 在benchmark生成后，将`../matlab/Phase`文件夹拷贝到构建目录中
 add_custom_command(TARGET CPUBenchmark POST_BUILD

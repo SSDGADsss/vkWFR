@@ -15,23 +15,23 @@ class cpuWFR {
   const int imgWidth, imgHeight;
   const std::array<int, 4> ROI;
 
-  fftw_complex *pre_handle_in = nullptr, *pre_handle_out = nullptr;
+  fftwf_complex *pre_handle_in = nullptr, *pre_handle_out = nullptr;
 
-  fftw_plan pre_plan;
+  fftwf_plan pre_plan;
 
-  std::vector<double> calReady;       // mm*nn*2
-  std::vector<double> GaussianWindow; // cal_width*cal_height
-  std::vector<double> result_ridge;
+  std::vector<float> calReady;       // mm*nn*2
+  std::vector<float> GaussianWindow; // cal_width*cal_height
+  std::vector<float> result_ridge;
 
   std::vector<std::array<float, 2>> calFreqList;
 
   struct Parallel_Freq {
-    fftw_complex *freq_handle_in;
-    fftw_complex *freq_handle_out;
-    fftw_complex *ifreq_handle_in;
-    fftw_complex *ifreq_handle_out;
-    fftw_plan freq_plan;
-    fftw_plan ifreq_plan;
+    fftwf_complex *freq_handle_in;
+    fftwf_complex *freq_handle_out;
+    fftwf_complex *ifreq_handle_in;
+    fftwf_complex *ifreq_handle_out;
+    fftwf_plan freq_plan;
+    fftwf_plan ifreq_plan;
   };
 
   std::vector<Parallel_Freq> ParallelPool;
@@ -41,7 +41,7 @@ public:
          float wxl, float wxi, float wxh, int sigmay, float wyl, float wyi,
          float wyh);
   ~cpuWFR();
-  std::vector<double> operator()(std::vector<unsigned char> image);
+  std::vector<float> operator()(std::vector<unsigned char> image);
 };
 
 #endif
