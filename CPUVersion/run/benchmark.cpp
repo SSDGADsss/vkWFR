@@ -1,7 +1,5 @@
-#include "vkWFR.hpp"
+#include "cpuWFR.hpp"
 #include <chrono>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #define STB_IMAGE_IMPLEMENTATION
@@ -14,9 +12,9 @@ void RunBenchmark(std::string filepath, bool smallPara) {
   if (raw_image == nullptr)
     throw std::runtime_error("Open image failed");
 
-  std::unique_ptr<vkWFR> algo;
+  std::unique_ptr<cpuWFR> algo;
   if (smallPara)
-    algo = std::make_unique<vkWFR>(
+    algo = std::make_unique<cpuWFR>(
         img_width, img_height, std::array<int, 4>{0, 0, img_width, img_height},
         10,   // sigmax
         -0.5, // wxl
@@ -28,7 +26,7 @@ void RunBenchmark(std::string filepath, bool smallPara) {
         0.5   // wyh
     );
   else
-    algo = std::make_unique<vkWFR>(
+    algo = std::make_unique<cpuWFR>(
         img_width, img_height, std::array<int, 4>{0, 0, img_width, img_height},
         20,  // sigmax
         -1,  // wxl
@@ -42,7 +40,7 @@ void RunBenchmark(std::string filepath, bool smallPara) {
 
   std::cout << "Test Start: " << filepath << " with "
             << (smallPara ? "small" : "big") << " param" << std::endl;
-  std::vector<float> result;
+  std::vector<double> result;
   auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < 100; i++)
     result = (*algo)(std::vector<unsigned char>(
@@ -57,7 +55,7 @@ void RunBenchmark(std::string filepath, bool smallPara) {
 }
 
 int main() {
-  std::cout << "vkWFR Benchmark - GPU" << std::endl;
+  std::cout << "vkWFR Benchmark - CPU" << std::endl;
   RunBenchmark("Phase/128x128_1.bmp", true);
   RunBenchmark("Phase/128x128_1.bmp", false);
   RunBenchmark("Phase/256x256_1.bmp", true);

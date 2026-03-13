@@ -11,7 +11,7 @@ int main() {
 
   int img_width, img_height, img_comp;
   unsigned char *raw_image =
-      stbi_load("/home/shenzhe/WorkSpace/vkWFR/matlab/smallpicture/000750.bmp",
+      stbi_load("/home/shenzhe/WorkSpace/vkWFR/matlab/bigPicture/000001.bmp",
                 &img_width, &img_height, &img_comp, 1);
 
   std::cout << "Load Image Width: " << img_width << " Height: " << img_height
@@ -20,8 +20,8 @@ int main() {
   assert(img_comp == 3);
 
   // NOTE: 和Matlab比，由于超尾特性，这里的宽度要+1
-  constexpr unsigned int roi_startX = 237, roi_startY = 293, roi_width = 101,
-                         roi_height = 83;
+  constexpr unsigned int roi_startX = 123, roi_startY = 198, roi_width = 142,
+                         roi_height = 166;
 
   vkWFR wfrobj(img_width, img_height,
                {roi_startX, roi_startY, roi_width, roi_height},
@@ -32,8 +32,8 @@ int main() {
                10,   // sigmay
                -0.5, // wyl
                0.1,  // wyi
-               0.5,  // wyh
-               0.0); // thr (对于WFR不需要)
+               0.5   // wyh
+  );                 // thr (对于WFR不需要)
 
   std::vector<float> result;
 

@@ -33,8 +33,8 @@ int main() {
                  10,   // sigmay
                  -0.5, // wyl
                  0.1,  // wyi
-                 0.5,  // wyh
-                 0.0); // thr (对于WFR不需要)
+                 0.5   // wyh
+    );                 // thr (对于WFR不需要)
 
     std::vector<float> result;
 
@@ -55,15 +55,15 @@ int main() {
   {
     vkWFR wfrobj(img_width, img_height,
                  {roi_startX, roi_startY, roi_width, roi_height},
-                 20,   // sigmax
-                 -1,   // wxl
-                 0.1,  // wxi
-                 1,    // wxh
-                 20,   // sigmay
-                 -1,   // wyl
-                 0.1,  // wyi
-                 1,    // wyh
-                 0.0); // thr (对于WFR不需要)
+                 20,  // sigmax
+                 -1,  // wxl
+                 0.1, // wxi
+                 1,   // wxh
+                 20,  // sigmay
+                 -1,  // wyl
+                 0.1, // wyi
+                 1    // wyh
+    );                // thr (对于WFR不需要)
 
     std::vector<float> result;
 

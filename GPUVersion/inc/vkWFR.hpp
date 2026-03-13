@@ -32,7 +32,7 @@ class vkWFR {
   const int sx, sy;
   const int cal_width, cal_height;
   const int sigmax, sigmay;
-  const float wxl, wxi, wxh, wyl, wyi, wyh, thr;
+  const float wxl, wxi, wxh, wyl, wyi, wyh;
 
   std::vector<std::array<float, 3>> calFreqList;
 
@@ -73,7 +73,7 @@ class vkWFR {
 public:
   vkWFR(int imgwidth, int imgheight, std::array<int, 4> ROI, int sigmax,
         float wxl, float wxi, float wxh, int sigmay, float wyl, float wyi,
-        float wyh, float thr);
+        float wyh);
   ~vkWFR();
 
   std::vector<float> operator()(std::vector<unsigned char> image);

@@ -100,10 +100,10 @@ add_compile_definitions(VK_API_VERSION=13)
 add_executable(${PROJECT_NAME} run/main.cpp ${SOURCE_DIR})
 add_executable(largeImage run/largeImage.cpp ${SOURCE_DIR})
 add_executable(smallImage run/smallImage.cpp ${SOURCE_DIR})
-add_executable(benchmark run/benchmark.cpp ${SOURCE_DIR})
+add_executable(GPUBenchmark run/benchmark.cpp ${SOURCE_DIR})
 
 # 在benchmark生成后，将`../matlab/Phase`文件夹拷贝到构建目录中
-add_custom_command(TARGET benchmark POST_BUILD
+add_custom_command(TARGET GPUBenchmark POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/matlab/Phase
         ${CMAKE_CURRENT_BINARY_DIR}/Phase

@@ -70,7 +70,7 @@ public:
 
 vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
              float wxl, float wxi, float wxh, int sigmay, float wyl, float wyi,
-             float wyh, float thr)
+             float wyh)
     : imgWidth(imgwidth_), imgHeight(imgheight_), ROI(ROI_),
       sx(static_cast<int>(std::round(3 * sigmax))),
       sy(static_cast<int>(std::round(3 * sigmay))),
@@ -79,7 +79,7 @@ vkWFR::vkWFR(int imgwidth_, int imgheight_, std::array<int, 4> ROI_, int sigmax,
       cal_width(2 * static_cast<int>(std::round(3 * sigmax)) + 1),
       cal_height(2 * static_cast<int>(std::round(3 * sigmay)) + 1),
       sigmax(sigmax), sigmay(sigmay), wxl(wxl), wxi(wxi), wxh(wxh), wyl(wyl),
-      wyi(wyi), wyh(wyh), thr(thr), FreqCalPool(FreqCalParallelNumber) {
+      wyi(wyi), wyh(wyh), FreqCalPool(FreqCalParallelNumber) {
   {
     // 初始化频率计算表
     calFreqList.reserve(((wyh + 1e-10 - wyl) / wyi + 1) *
