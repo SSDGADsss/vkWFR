@@ -113,9 +113,6 @@ cpuWFR::~cpuWFR() {
 }
 
 std::vector<double> cpuWFR::operator()(std::vector<unsigned char> image) {
-  omp_lock_t lock;
-  omp_init_lock(&lock);
-
   memset(pre_handle_in, 0, sizeof(fftw_complex) * mm * nn);
 
 #pragma omp parallel for
@@ -167,8 +164,8 @@ std::vector<double> cpuWFR::operator()(std::vector<unsigned char> image) {
       fft_obj.ifreq_handle_out[i][1] /= mm * nn;
     }
 
+#pragma omp critical
     {
-      omp_set_lock(&lock);
       for (int i = 0; i < ROI[2]; i++)
         for (int j = 0; j < ROI[3]; j++)
           result_ridge[i * ROI[3] + j] = std::max(
@@ -178,11 +175,8 @@ std::vector<double> cpuWFR::operator()(std::vector<unsigned char> image) {
                   fft_obj.ifreq_handle_out[(sx + i) * nn + (sy + j)][1] *
                       fft_obj.ifreq_handle_out[(sx + i) * nn + (sy + j)][1]),
               result_ridge[i * ROI[3] + j]);
-      omp_unset_lock(&lock);
     }
   }
-
-  omp_destroy_lock(&lock);
 
   std::vector<double> result(result_ridge.size());
   // 这里转回行优先
