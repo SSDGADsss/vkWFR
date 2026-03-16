@@ -15,6 +15,12 @@ REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(glslang REQUIRED)
 
+set (LIB_TYPE SHARED)
+string(TOLOWER ${LIB_TYPE} SEARCH_TYPE)
+find_package (HDF5 NAMES hdf5 COMPONENTS CXX ${SEARCH_TYPE})
+set_directory_properties(PROPERTIES INCLUDE_DIRECTORIES "${HDF5_INCLUDE_DIR}")
+set (H5PL_LINK_LIBS ${H5PL_LINK_LIBS} ${HDF5_CXX_${LIB_TYPE}_LIBRARY})
+
 option(KOMPUTE_OPT_GIT_TAG "The tag of the repo to use for the example" v0.9.0)
 
 set(KOMPUTE_OPT_LOG_LEVEL Warn)
@@ -95,6 +101,7 @@ link_libraries(
   glslang
   Vulkan::Vulkan
   VkFFT
+  ${H5PL_LINK_LIBS}
 )
 add_compile_definitions(VK_API_VERSION=13)
 add_executable(${PROJECT_NAME} run/main.cpp ${SOURCE_DIR})
