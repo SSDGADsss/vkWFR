@@ -8,7 +8,7 @@
 
 如下是高斯窗口大小为10x10的Benchmark，其中CPU版本和Matlab均运行在`AMD Ryzen 9700X`处理器上，Vulkan程序运行在`NVIDIA A10`显卡上
 
-![Benchmark-10x10](https://github.com/SSDGADsss/vkWFR/blob/60a0dc2ec4c6af0533d90a9285fcca8fe0103b00/img/Gaussion%20Window%2010x10.png)
+![Benchmark-10x10](https://github.com/SSDGADsss/vkWFR/blob/66a949012ea7447d5bbba5282165d1c9aff5683b/img/Gaussion%20Window%2010x10.png)
 
 如下是高斯大小为10x10下，其相较于Matlab计算结果的误差分布图，其最大误差均在5e-4以下。
 
