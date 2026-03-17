@@ -87,6 +87,9 @@ target_include_directories(shader
 
 add_library(VkFFT INTERFACE)
 target_compile_definitions(VkFFT INTERFACE VKFFT_BACKEND=0)
+target_include_directories(VkFFT INTERFACE inc)
+
+install(TARGETS VkFFT)
 
 aux_source_directory(src SOURCE_DIR)
 
