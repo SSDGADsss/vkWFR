@@ -4,13 +4,15 @@
 
 ## 项目介绍
 
-本项目在[WFR](https://ww2.mathworks.cn/matlabcentral/fileexchange/24852-windowed-fourier-transform-for-fringe-pattern-analysis)算法基础上，使用Vulkan API利用GPU进行加速，在`AMD Redeon 780M`核显上其性能相较于Matlab有着最高超过1956.85%的性能提升。为解决高速高分辨条纹图的处理奠定了基础。
+本项目在[WFR](https://ww2.mathworks.cn/matlabcentral/fileexchange/24852-windowed-fourier-transform-for-fringe-pattern-analysis)算法基础上，使用Vulkan API利用GPU进行加速，在`AMD Redeon 780M`核显上其性能相较于Matlab有着最高超过1956.85%的性能提升，并且具备和Matlab版本相近的精度。为解决高速高分辨条纹图的处理奠定了基础。
 
-如下是Benchmark，其中CPU版本和Matlab均运行在`AMD Ryzen 9700X`处理器上，Vulkan运行在AMD Radeon 780M集成显卡上
+如下是高斯窗口大小为10x10的Benchmark，其中CPU版本和Matlab均运行在`AMD Ryzen 9700X`处理器上，Vulkan程序运行在`NVIDIA A10`显卡上
 
 ![Benchmark-10x10](https://github.com/SSDGADsss/vkWFR/blob/60a0dc2ec4c6af0533d90a9285fcca8fe0103b00/img/Gaussion%20Window%2010x10.png)
 
-![Benchmark-20x20](https://github.com/SSDGADsss/vkWFR/blob/60a0dc2ec4c6af0533d90a9285fcca8fe0103b00/img/Gaussion%20Window%2020x20.png)
+如下是高斯大小为10x10下，其相较于Matlab计算结果的误差分布图，其最大误差均在5e-4以下。
+
+![ErrorDistribution](https://github.com/SSDGADsss/vkWFR/blob/90ceddb610a34dff0b7fb7ef4970f7e76d2a7066/img/Error%20Distribution.png)
 
 ## 编译
 
